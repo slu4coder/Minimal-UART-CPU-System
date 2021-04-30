@@ -1,6 +1,7 @@
 # Minimal UART CPU System
 
 NEWS: There is a new revision 1.5 coming soon featuring 512KB FLASH SSD, 3.6864MHz clock speed and an expansion port!
+NEWS: Pysthon Assembler: ...
 
 NEWS: User Manual: https://docs.google.com/document/d/1c2ZHtLd1BBAwcBAjBZZJmCA3AXpbpv80dlAtsMYpuF4/edit?usp=sharing
 
