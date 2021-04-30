@@ -1,4 +1,4 @@
-# Minimal UART Computer System (Revision 1.3 aka FLASH Edition)
+# Minimal UART CPU System
 
 NEWS: There is a new revision 1.5 coming soon featuring 512KB FLASH SSD, 3.6864MHz clock speed and an expansion port!
 
