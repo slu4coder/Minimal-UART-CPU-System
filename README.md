@@ -7,7 +7,7 @@ NEWS: Minimal Python Assembler released: https://www.youtube.com/watch?v=rdKX9hz
 NEWS: User Manual (slowly growing): https://docs.google.com/document/d/1c2ZHtLd1BBAwcBAjBZZJmCA3AXpbpv80dlAtsMYpuF4/edit?usp=sharing
 
 NEWS: The Minimal CPU System now has a dedicated serial 'Minimal Terminal': https://github.com/slu4coder/Minimal-Terminal
-      but still can be operated via a USB-to-serial breakout board and a terminal emulation (e. g. Tera Term) of cause.
+but can also be operated via a USB-to-serial breakout board and a terminal emulation (e. g. Tera Term) of cause.
 
 I've built my own Computer from scratch - using nothing but TTL chips, because, well, why not? I wanted a CPU that is easy to understand, fun to build and powerful enough to allow for programming educational stuff and little games on it. Ah, and by the way - it should be as simple as possible - sort of the "Simplest Usable Personal Computer". This repo provides you with everything you need to follow my one-and-a-half-year journey down this rabbit hole. Besides running some video game classics, this little DIY CPU is capable of parsing arbitrary mathmatical expressions and performing floating point calculations in single (32-bit) precision. And it comes with an SSD file system, too, since it uses it's own FLASH IC as permanent SSD storage.
 
