@@ -1,6 +1,6 @@
 # Let's Code an Assembler from Scratch in Python (< 100 Lines)
 
-Project files of YouTube video ...
+Project files of YouTube video https://www.youtube.com/watch?v=rdKX9hzA2lU
 
 Usage: python asm.py hello.txt
 
