@@ -86,7 +86,7 @@
   OS_Menu:      LDI <menutxt PHS LDI >menutxt PHS
                 JPS OS_Print PLS PLS
                 JPA OS_Prompt
-  OS_Run:        INB OS_ParsePtr
+  OS_Run:       INB OS_ParsePtr
                 JPR OS_MemAddr                      ; r => jumps immediately to OS_MemAddr
   doppel:       LDI 1 JPA setmode                   ; : => umschalten auf DEPOSIT OS_Mode=1
   punkt:          LDI 2                             ; . => umschalten auf LIST OS_Mode
@@ -312,7 +312,7 @@ OS_PrintHex:    LDS 3                           ; read value from stack
                   ADI 39                        ; mache einen Buchstaben draus
   Hex8msn:      OUT NOP NOP NOP NOP             ; min. 160 cycles bis zum nächsten UART send
                 LDS 3
-                LSL LSL LSL LSL LSR LSR LSR LSR
+                LSL LSL LSL LSL LSR LSR LSR LSR ; no point in optimizing this
                 ADI '0'
                 CPI 58 BCC Hex8lsn
                   ADI 39
@@ -826,6 +826,7 @@ SSD_FindFile:     ; browse through all stored files and see if <filename> matche
 OS_END:                                         ; address of first unused byte after OS code
 
                 #end                            ; VARIABLES USED BY THE OS    
+
 #org 0xe000     OS_SSDRAMBuf:                   ; 4KB buffer for 'data to keep' when moving files and erasing SSD blocks                                
 #org 0xfeb0     OS_MemAddr:                     ; current memory address (16 bytes von MINOS am unteren Ende des Stack)
 #org 0xfeb2     OS_ParsePtr:                    ; Zeiger auf das letzte eingelesene Zeichen (to be reset at startup)
