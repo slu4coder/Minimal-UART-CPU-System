@@ -1,10 +1,10 @@
-; ****************************************************************************
-; *****                                                                  *****
-; ***** MinOS 1.5 for the 8-Bit Minimal Computer System Revision 1.3-1.5 *****
-; *****                                                                  *****
-; *****      written by Carsten Herting - last update May 21th 2021      *****
-; *****                                                                  *****
-; ****************************************************************************
+; ******************************************************************************
+; *****                                                                    *****
+; ***** MinOS 1.5.0 for the 8-Bit Minimal Computer System Revision 1.3-1.5 *****
+; *****                                                                    *****
+; *****       written by Carsten Herting - last update June 3rd 2021       *****
+; *****                                                                    *****
+; ******************************************************************************
 ; Usage for in-situ programming: Open command shell, type 'asm os.txt', upload
 ; image via terminal to 0xe000 - 0xefff, load prom, type 8000 r, enjoy new OS.
 
@@ -43,6 +43,8 @@
   _Mnemonics:   mnemonics
   _Operands:    operands
   _HexToWord:   JPA HexToWord
+  _CursorX:     JPA OS_CursorX
+  _CursorY:     JPA OS_CursorY
  
   OS_Start:     LDI 0xfe STA 0xffff                            ; stack init
                 
@@ -252,13 +254,13 @@ OS_HexToWord:   LDR OS_ParsePtr CPI 32 BNE htw_nospace
                 JPS HexToWord PLS PLS PLS
                 RTS
 
-; ************************************************
-; Parses hex number 0x0000 - 0xffff from <addr>
+; *********************************************************************************
+; Parses hex number 0x0000 - 0xffff from <addr>, breaks at ANY char != [0..9, a..f]
 ; push: #, addr_lsb, addr_msb
 ; pull: word_lsb, word_msb, status (OS_ParseNum+2)
 ; success: status = 0x00, failure: status = 0xf0
 ; modifies: OS_ParsePtr, OS_ParseNum
-; ************************************************
+; *********************************************************************************
 HexToWord:      LDS 3 STA OS_ParsePtr+1
                 LDS 4 STA OS_ParsePtr+0
                 CLW OS_ParseNum LDI 0xf0 STA OS_ParseNum+2
@@ -321,12 +323,40 @@ OS_PrintHex:    LDS 3                           ; read value from stack
   phex_wait:    DEC BNE phex_wait               ; with duration = 3 + n * 11 cycles
                 RTS
 
-; *********************************************************************************
-; Waits for a UART transmission to complete when called via API (164 including out)
-; *********************************************************************************
-OS_WaitUART:    LDI 11
-  wuart_loop:   DEC BNE wuart_loop              ; with duration = 3 + n * 11 cycles
+; ***********************************
+; positions the cursor 1..60 or 1..25
+; push: pos
+; pull: #
+; modifies: OS_Count
+; ***********************************
+OS_CursorX:     LDI 27 OUT JPS _WaitUART
+                LDI '[' OUT JPS _WaitUART
+                JPS u6print
+                LDI 'G' OUT JPS _WaitUART     ; set x
                 RTS
+OS_CursorY:     LDI 27 OUT JPS _WaitUART
+                LDI '[' OUT JPS _WaitUART
+                JPS u6print
+                LDI 'd' OUT JPS _WaitUART     ; set y
+                RTS
+  u6print:		  CLB OS_Count
+                LDS 5
+    U6_40:			CPI 40 BMI U6_20
+                  SBI 40 PHS LDI 4 ADB OS_Count PLS
+    U6_20:			CPI 20 BMI U6_10
+                  SBI 20 PHS LDI 2 ADB OS_Count PLS
+    U6_10:			CPI 10 BMI U6_00
+                  SBI 10 PHS INB OS_Count PLS
+    U6_00:			PHS LDA OS_Count ADI 48 OUT JPS 0xf00c
+                PLS ADI 48 OUT JPS 0xf00c
+                RTS
+
+; ********************************************************************************************
+; Takes 160 cycles (for UART transmission to complete) when called via API (164 including out)
+; ********************************************************************************************
+OS_WaitUART:    LDI 11                          ; including this statement:
+  wuart_loop:   DEC BNE wuart_loop              ; duration = 3 + n * 11 cycles
+                RTS                             ; JPS: 16, RTS: 14: JPA: 6
 
 ; ***************************************************************
 ; COMMAND 'Memory filler', copies byte value into block of memory
@@ -508,7 +538,7 @@ OS_DirTable:      INB OS_ParsePtr
   dir_file:         LDA OS_PtrC+1 CPI 0x80 BCS dir_showfree                       ; pointer inside FLASH?
                     LDR OS_PtrC CPI 0xff BEQ dir_showfree                         ; end of dir reached
                     LDA OS_PtrC+0 PHS LDA OS_PtrC+1 PHS JPS OS_Print PLS PLS      ; print filename                    
-                    LDI <coltext PHS LDI >coltext PHS JPS OS_Print PLS PLS        ; move cursor to absolute column
+                    LDI 21 PHS JPS OS_CursorX                                     ; move cursor to absolute column
                     LDI 21 ADW OS_PtrC                                            ; advance over header to start addr MSB!!!
                     LDR OS_PtrC PHS JPS OS_PrintHex PLS
                     DEW OS_PtrC LDR OS_PtrC PHS JPS OS_PrintHex PLS               ; print start addr
@@ -819,7 +849,6 @@ SSD_FindFile:     ; browse through all stored files and see if <filename> matche
 
   dirtext:      10
                 'FILENAME........... DEST SIZE', 10, 0
-  coltext:      27, '[21G', 0
   freetext:     27, '[21GFREE ', 0
   suretext:     'y/n?', 10, 0
 
