@@ -1,4 +1,4 @@
-#org 0x8000
+#org 0xc000
 
 start:    LDI 0x1e  ; prints all visible chars starting from 30 up until 255
 
@@ -7,4 +7,4 @@ next:     OUT NOP NOP NOP NOP NOP NOP NOP NOP NOP NOP
           BCC next
             JPA start
 
-#org 0x8000
+#org 0xc000
