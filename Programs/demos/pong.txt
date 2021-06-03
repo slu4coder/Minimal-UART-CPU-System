@@ -1,51 +1,51 @@
-          #org 0x8000
-; ***********************************
-; *****                         *****
-; ***** PONG by C. Herting 2020 *****
-; *****                         *****
-; ***********************************
+          #org 0xc000
+; **************************************
+; *****                            *****
+; ***** MINPONG by C. Herting 2021 *****
+; *****                            *****
+; **************************************
           LDI 0xfe STA 0xffff            ; init stack
-          LDI 25 STA spos                ; initialize start variables
+          LDI 25 STA spos                ; initialize
           LDI 0 STA xpos+0 LDI 13 STA xpos+1
           LDI 0 STA ypos+0 LDI 1 STA ypos+1
           LDI 80 STA xvel LDI 127 STA yvel
 
-start:    INP BEQ movitx                 ; Tastendruck => Schläger bewegen
+start:    INP BEQ movitx
 
 ; *********************
 ; ***** Steuerung *****
 ; *********************
-          CPI ' '             ; Taste SPACE (nur nach GAME OVER)
+          CPI ' '             ; key space
           BNE nextkey1
             LDA ypos+1
-            CPI 25            ; SPACE nur bei GAME OVER akzeptieren
+            CPI 25
             BCC movitx
               CLB ypos+0 CLB ypos+1
-              LDI 127 STA yvel            
-nextkey1: CPI 'a'             ; Taste 'a'
+              LDI 127 STA yvel
+nextkey1: CPI 'a'             ; key a
           BNE nextkey2
             LDA spos
-            CPI 0
+            CPI 1
             BEQ nextkey2
               DEB spos
               JPA movitx
-nextkey2: CPI 'd'             ; Taste 'd' abfragen
+nextkey2: CPI 'd'             ; key d
           BNE movitx
             LDA spos
-            CPI 30			      ; Breite - 10
+            CPI 51            ; width - 10
             BEQ movitx
               INB spos
 
 ; ********************
 ; ***** Bewegung *****
 ; ********************
-movitx:   LDA xvel            ; Ball bewegen in x
+movitx:   LDA xvel            ; move ball in x
           CPI 0
           BMI xneg
             LDA xvel          ; vx >= 0
             ADW xpos
             LDA xpos+1
-            CPI 39		        ; rechter Rand erreicht?
+            CPI 60            ; right wall
             BNE movity
               NEB xvel
               JPA movity
@@ -53,19 +53,19 @@ xneg:     LDA xvel            ; vx < 0
           NEG
           SBW xpos
           LDA xpos+1
-          CPI 0
+          CPI 1
           BNE movity
             NEB xvel
 
-movity:   LDA yvel            ; Ball bewegen in y
+movity:   LDA yvel            ; move ball in y
           CPI 0
           BMI yneg
             LDA yvel          ; vy >= 0
             ADW ypos
             LDA ypos+1
-              CPI 22          ; BALL GENAU AUF SCHLÄGERHÖHE?
-              BCC clear       ; ypos ist noch höher => keine Aktion
-                BEQ rackettest  ; ypos ist auf Schlägerhöhe => Schlägertest
+              CPI 22          ; ball at racket?
+              BCC clear
+                BEQ rackettest  ; test for racket
                   CPI 25
                   BCC clear
                     CLB yvel
@@ -74,134 +74,74 @@ yneg:     LDA yvel            ; vy < 0
           NEG
           SBW ypos
           LDA ypos+1
-          CPI 0
+          CPI 1
           BNE clear
             NEB yvel
             JPA clear
 
 ; ***********************************
-; ***** Ball-Schläger-Kollision *****
+; ***** Ball-Schlaeger-Kollision *****
 ; ***********************************
-rackettest: LDA xpos+1        ; Ansprung nur bei ypos = Schlägerhöhe: Testet das Abprallen vom Schläger
+rackettest: LDA xpos+1
             CPA spos
-            BCC clear         ; xpos ist kleiner als linker Schlägerrand => vorbei
+            BCC clear
               SBI 10
-							BCC rackhit	    ; fange den neg. Überlauf ab
-  							CPA spos
-                BCS clear     ; xpos ist größer oder gleich spos + 10 => vorbei
+              BCC rackhit
+                CPA spos
+                BCS clear
 rackhit:          NEB yvel
 
 ; *********************************
 ; ***** Zeichnen eines frames *****
 ; *********************************
-clear:    LDI 27 OUT JPS WaitOnUART    ; Bildschirm löschen
-          LDI '[' OUT JPS WaitOnUART
-          LDI 'H' OUT JPS WaitOnUART
-					LDI 27 OUT JPS WaitOnUART
-          LDI '[' OUT JPS WaitOnUART
-          LDI 'J' OUT JPS WaitOnUART
-          
-          LDA spos            ; Cursor zur Schlägerpos
-          STS -4
-          LDI 23
-          STS -5
-          JPS CursorXY
-          LDI 10              ; Schläger malen
+clear:    LDI 27 OUT JPS _WaitUART      ; clear screen
+          LDI '[' OUT JPS _WaitUART
+          LDI 'H' OUT JPS _WaitUART
+          LDI 27 OUT JPS _WaitUART
+          LDI '[' OUT JPS _WaitUART
+          LDI 'J' OUT JPS _WaitUART
+          LDA spos PHS JPS _CursorX PLS ; to racket pos
+          LDI 23 PHS JPS _CursorY PLS
+          LDI 10                        ; draw racket?
           STA var
-rackloop: LDI '=' OUT JPS WaitOnUART
+rackloop: LDI '=' OUT JPS _WaitUART
           DEB var
           BNE rackloop
 
-          LDA ypos+1          ; Ball malen?
+          LDA ypos+1                    ; draw ball?
           CPI 25
-          BCS gameover        ; Ball nicht malen, da GAME OVER
-            STS -5
-            LDA xpos+1 STS -4
-            JPS CursorXY
-            LDI 'o' OUT JPS WaitOnUART ; Ball malen
+          BCS gameover                  ; do not draw
+            PHS JPS _CursorY PLS
+            LDA xpos+1 PHS JPS _CursorX PLS
+            LDI 'o' OUT JPS _WaitUART   ; Ball malen
             JPA frameend
 
-gameover: LDI 1 STS -4
-          LDI 11 STS -5
-          JPS CursorXY
-          LDI <text STS -3		; put MSB of string address on the stack
-          LDI >text STS -4		; put LSB of string address on the stack
-          JPS PrintText
+gameover: LDI 11 PHS JPS _CursorX PLS
+          LDI 11 PHS JPS _CursorY PLS
+          LDI <text PHS LDI >text PHS
+          JPS _Print PLS PLS
 
-frameend: CLW var+0             ; WARTEN, DAMIT EIN FRAME EINE ZEIT DAUERT
-          LDI 8
-          STA var+1
-waitloop: DEW var
-          BNE waitloop
-
+frameend: CLW var                       ; wait
+          LDI 16 STA var+1
+waitloop: DEW var BNE waitloop            
           JPA start
 
-text:   	'GAME OVER - PRESS SPACE TO PLAY AGAIN', 0
+text:     'GAME OVER - PRESS SPACE TO TRY AGAIN', 0
 
-; ***** Schreibt einen nullterminierten String *****
-PrintText: 		LDS -1 STA Print_ptr+0
-            	LDS -2 STA Print_ptr+1 	         	; get LSB and MSB
-  printloop:  LDR Print_ptr CPI 0	    	        ; Print routine
-							BEQ printend          		        ; string zuende?
-            	  OUT JPS WaitOnUART
-        		    INW Print_ptr         		      ; zeige auf das nächste Zeichen
-     		        JPA printloop
-  printend:	  RTS
+#end
 
-; ********************************************************************************
-; ***** Set the cursor xy position (caller deposits x in SP-4 and y in SP-5) *****
-; ********************************************************************************
-CursorXY:     LDI 27 OUT JPS WaitOnUART             ; Bring cursor home
-              LDI '[' OUT JPS WaitOnUART
-              LDI 'H' OUT JPS WaitOnUART
+#org 0xef00              ; put variables into temp RAM
 
-              LDS -2 CPI 0
-              BEQ CursorNoX
-                LDI 27 OUT JPS WaitOnUART
-                LDI '[' OUT JPS WaitOnUART
-                JPS CursorDec					              ; schreibe Anzahl x in DEC
-  							LDI 'C' OUT JPS WaitOnUART
-CursorNoX:    LDS -3 CPI 0
-              BEQ CursorNoY
-                STS -2
-                LDI 27 OUT JPS WaitOnUART
-                LDI '[' OUT JPS WaitOnUART
-                JPS CursorDec					              ; schreibe Anzahl y in DEC
-                LDI 'B' OUT JPS WaitOnUART
-CursorNoY:		RTS
+spos:         0          ; racket pos
+xpos:         0, 0       ; LSB, MSB ball x
+ypos:         0, 0       ; LSB, MSB ball y
+xvel:         0          ; signed speed vector of the ball
+yvel:         0          ; 2nd component
+var:          0, 0       ; for counting
 
-CursorDec:	LDS 0								    ; subroutine printing out SP-0 as a decimal number between 0 and 63
-            SBI 30
-            BCS Cursorprint3
-              ADI 10
-              BPL Cursorprint2
-                ADI 10
-                BPL Cursorprint1
-                  ADI 10
-CursorEiner:     	ADI '0'
-                  OUT
-                  NOP
-WaitOnUART:       NOP NOP NOP NOP NOP NOP NOP NOP
-							  	RTS
-Cursorprint3:	STS 0                 ; Einer sichern
-              LDI '3'   						; '3' ausgeben
-CursorZehner: OUT NOP NOP NOP NOP NOP NOP NOP NOP NOP
-              LDS 0                 ; Einer laden
-              JPA CursorEiner
-Cursorprint2:	STS 0
-              LDI '2'   						; '2' ausgeben
-							JPA CursorZehner
-Cursorprint1:	STS 0
-              LDI '1'   						; '1' ausgeben
-							JPA CursorZehner
+#end                     ; use these OS API routines
 
-              #end
-#org 0xef00
-              ; put variables into temp RAM
-spos:         0                   ; x-Position des Schlägers (links)
-xpos:         0, 0                ; LSB, MSB der x-Textposition des Balls
-ypos:         0, 0                ; LSB, MSB der y-Textposition des Balls
-xvel:         0                   ; signed Geschwindigkeitsvektor des Balls
-yvel:         0
-var:          0, 0                ; Zählvariable
-Print_ptr:		0, 0								; Zeiger auf den Text
+#org 0xf006   _Print:    ; Prints a null-terminated string
+#org 0xf00c   _WaitUART: ; Waits for UART transmission
+#org 0xf022   _CursorX:  ; set the cursor x position 1..60
+#org 0xf025   _CursorY:  ; set the cursor y position 1..25

@@ -1,9 +1,9 @@
-               #org 0x8000
+               #org 0xc000
 ; **********************************************
 ; *****                                    *****
 ; *****    MINIMAL BLOCKS by slu4 (2021)   *****
 ; *****                                    *****
-; *****       last update 26.04.2021       *****
+; *****       last update 03.06.2021       *****
 ; *****            ROM Version             *****
 ; *****                                    *****
 ; **********************************************
@@ -11,13 +11,12 @@
 game_restart: CLB state
               JPS PrintIntro
 
-game_loop:    LDI 27 OUT JPS WaitOnUART   ; lass den cursor verschwinden
-              LDI '[' OUT JPS WaitOnUART
-              LDI 'H' OUT JPS WaitOnUART
-              JPS Sleep                   ; refresh alle 1/60s
-              JPS Randomize               ; Zufallsgenerator bedienen
-              LDA state                   ; switch depending on game state
-              DEC
+game_loop:    LDI 27 OUT JPS _WaitUART   ; hide cursor
+              LDI '[' OUT JPS _WaitUART
+              LDI 'H' OUT JPS _WaitUART
+              JPS Sleep                   ; refresh 1/60s
+              JPS Randomize
+              LDA state DEC               ; switch state
               BCC state_intro
                 DEC
                 BCC state_run
@@ -42,25 +41,17 @@ cfloop:         LDI '.' STR ptr
                   JPS PrintFrame       ; Rahmen einmalig malen (mit leerem Spielfeld)
                   JPS NewShape         ; pick random shape to start with (no test required)
                   LDI '#' STA shapechar JPS PrintShape       ; Tetromino malen
-                  LDI 27 OUT JPS WaitOnUART
-                  LDI '[' OUT JPS WaitOnUART
-                  LDI 'H' OUT JPS WaitOnUART
-                  LDI <scoretext STS -3
-                  LDI >scoretext STS -4
-                  JPS PrintText
-                  LDI 27 OUT JPS WaitOnUART
-                  LDI '[' OUT JPS WaitOnUART
-                  LDI '1' OUT JPS WaitOnUART
-                  LDI '6' OUT JPS WaitOnUART
-                  LDI 'C' OUT JPS WaitOnUART
-                  LDI <hightext STS -3
-                  LDI >hightext STS -4
-                  JPS PrintText
-                  LDA highscore+0 STS -3 LDA highscore+1 STS -4
-                  JPS DecU16Print
-                  LDI <controltext STS -3
-                  LDI >controltext STS -4
-                  JPS PrintText
+                  LDI <scoretext PHS
+                  LDI >scoretext PHS
+                  JPS _Print PLS PLS
+                  LDI <hightext PHS
+                  LDI >hightext PHS
+                  JPS _Print PLS PLS
+                  LDA highscore+0 PHS LDA highscore+1 PHS
+                  JPS U16_Print PLS PLS
+                  LDI <controltext PHS
+                  LDI >controltext PHS
+                  JPS _Print PLS PLS
                   INB state            ; STATE = RUNNING!!!
                   JPA game_loop
 
@@ -72,10 +63,9 @@ state_run:    INW gameframes           ; Zeit weiterzählen
               BPL run_keyboard
                 LDA gameframes+1       ; fall-timer 'waiting' neu setzen
                 LSR NEG ADI 80 STA waiting
-                LDA xpos STS -3 LDA ypos INC STS -4
-                JPS TestShape
-                LDS -3 DEC
-                BCC run_placeit                         ; Stelle BESETZT => Stein plazieren
+                LDA xpos PHS LDA ypos INC PHS
+                JPS TestShape PLS
+                PLS DEC BCC run_placeit                         ; Stelle BESETZT => Stein plazieren
                   LDI '.' STA shapechar JPS PrintShape  ; Stelle war frei => Stein fällt runter und weiter
                   INB ypos             
                   LDI '#' STA shapechar JPS PrintShape
@@ -88,20 +78,20 @@ run_keyboard: INP BEQ game_loop                         ; Steuerung (non-blockin
               JPA game_loop
 
 a_key:        LDI '.' STA shapechar JPS PrintShape
-              LDA xpos DEC STS -3 LDA ypos STS -4 JPS TestShape
-              LDS -3 SBB xpos
+              LDA xpos DEC PHS LDA ypos PHS JPS TestShape PLS
+              PLS SBB xpos
               JPA run_drawshape
 d_key:        LDI '.' STA shapechar JPS PrintShape
-              LDA xpos INC STS -3 LDA ypos STS -4 JPS TestShape
-              LDS -3 ADB xpos
+              LDA xpos INC PHS LDA ypos PHS JPS TestShape PLS
+              PLS ADB xpos
               JPA run_drawshape
 w_key:        LDI '.' STA shapechar JPS PrintShape  ; alte Shape löschen
               JPS RotateShape                       ; rotierte shape erzeugen
-              LDA xpos STS -3 LDA ypos STS -4 JPS TestShape LDS -3 DEC BCS run_drawshape                  ; test position
-              LDA xpos INC STA xpos STS -3 LDA ypos STS -4 JPS TestShape LDS -3 DEC BCS run_drawshape     ; and possible wall kicks
-              LDA xpos SBI 2 STA xpos STS -3 LDA ypos STS -4 JPS TestShape LDS -3 DEC BCS run_drawshape
-              LDA xpos ADI 3 STA xpos STS -3 LDA ypos STS -4 JPS TestShape LDS -3 DEC BCS run_drawshape
-              LDA xpos SBI 4 STA xpos STS -3 LDA ypos STS -4 JPS TestShape LDS -3 DEC BCS run_drawshape
+              LDA xpos PHS LDA ypos PHS JPS TestShape PLS PLS DEC BCS run_drawshape                  ; test position
+              LDA xpos INC STA xpos PHS LDA ypos PHS JPS TestShape PLS PLS DEC BCS run_drawshape     ; and possible wall kicks
+              LDA xpos SBI 2 STA xpos PHS LDA ypos PHS JPS TestShape PLS PLS DEC BCS run_drawshape
+              LDA xpos ADI 3 STA xpos PHS LDA ypos PHS JPS TestShape PLS PLS DEC BCS run_drawshape
+              LDA xpos SBI 4 STA xpos PHS LDA ypos PHS JPS TestShape PLS PLS DEC BCS run_drawshape
                 INB xpos           ; zurück auf Anfangsposition
                 INB xpos
                 JPS RotateShape    ; Rotation war nicht frei => zurückdrehen
@@ -147,9 +137,9 @@ rpiswall:     INB ptr2
               BNE rpxloop
                 LDA rowfull DEC
                 BCC rpcopydone
-                  INB anzrows           ; diese Reihe war voll!
+                  INB anzrows         ; diese Reihe war voll!
                   LDA ptr2+0 DEC STA ptr+0  ; Ende der vollen Reihe -> ptr = destination
-                  SBI 10 STA ptr1+0     ; ptr1 = source eine Reihe darüber                  
+                  SBI 10 STA ptr1+0   ; ptr1 = source eine Reihe darüber                  
 rpcopyloop:       LDR ptr1 STR ptr    ; Wert von darüber nach darunter kopieren
                   DEB ptr DEB ptr1
                   BCS rpcopyloop
@@ -162,32 +152,31 @@ rpcopydone:     DEB vary
                 BNE rpyloop
                   LDI >wintable STA ptr+1 LDI <wintable STA ptr+0
                   LDA anzrows ADW ptr
-                  LDR ptr ADW score LDR ptr ADW score     ; add score for cleared rows
-                  LDA dropsteps ADW score                 ; add the drop points
-                  LDI 27 OUT JPS WaitOnUART
-                  LDI '[' OUT JPS WaitOnUART
-                  LDI '6' OUT JPS WaitOnUART
-                  LDI 'C' OUT JPS WaitOnUART
-                  LDA score+0 STS -3 LDA score+1 STS -4
-                  JPS DecU16Print       ; Score malen
+                  LDR ptr ADW score LDR ptr ADW score  ; add score for cleared rows
+                  LDA dropsteps ADW score              ; add the drop points
+                  LDI 27 OUT JPS _WaitUART
+                  LDI '[' OUT JPS _WaitUART
+                  LDI '6' OUT JPS _WaitUART
+                  LDI 'C' OUT JPS _WaitUART
+                  LDA score+0 PHS LDA score+1 PHS
+                  JPS U16_Print PLS PLS ; print score
                   LDA score+1           ; check if there is a new highscore
                   CPA highscore+1
                   BCC rpnewshape
                   BNE rpnewhigh  
-                    LDA score+0         ; fast gleich => 2. Prüfung
+                    LDA score+0
                     CPA highscore+0
                     BCC rpnewshape
-rpnewhigh:            LDA score+0 STA highscore+0   ; score wird highscore
+rpnewhigh:            LDA score+0 STA highscore+0   ; score = highscore
                       LDA score+1 STA highscore+1
 
 rpnewshape:     CLB dropsteps
-                JPS NewShape            ; pick random shape to start with (no test required)
-                JPS PrintField          ; Spielfeld malen
+                JPS NewShape            ; pick random shape
+                JPS PrintField          ; draw field
                 JPS PrintShape          ; Tetromino malen
-                LDA xpos STS -3 LDA ypos STS -4 JPS TestShape
-                LDS -3 DEC
-                BCS game_loop
-                  INB state           ; INVALID POSITION => GAME OVER
+                LDA xpos PHS LDA ypos PHS JPS TestShape PLS
+                PLS DEC BCS game_loop
+                  INB state             ; INVALID POSITION => GAME OVER
                   JPS PrintOver
                   JPA game_loop
 
@@ -200,11 +189,11 @@ state_over:   INP CPI 32
 
 ; **********************************************************************************************
 
-NewShape:     LDI <shape STA ptr2+0     ; copy a random Tetromino into the shape structure
+NewShape:     LDI <shape STA ptr2+0  ; copy a random piece into shape
               LDI >shape STA ptr2+1
               LDI <minos STA ptr+0
               LDI >minos STA ptr+1
-              LDA randomnum LSL LSL LSL ADA randomnum       ; x 9
+              LDA randomnum LSL LSL LSL ADA randomnum   ; x 9
               ADW ptr
               LDI 8 STA vari
 nscopyloop:   LDR ptr STR ptr2
@@ -217,18 +206,18 @@ nscopyloop:   LDR ptr STR ptr2
                 LDR ptr STA xoff                
                 RTS
 
-TestShape:    LDI <shape STA ptr+0    ; teste, ob diese Position für die aktuelle shape frei ist
+TestShape:    LDI <shape STA ptr+0    ; test if pos is free
               LDI >shape STA ptr+1
               LDI >vram STA ptr2+1
               LDI 4 STA vari
-tsloop:       LDS -1                  ; lade test-xpos
+tsloop:       LDS 4                   ; lade test-xpos
               ADR ptr                 ; addiere shape-xoffset hinzu
               BMI tsoutside           ; prüfe linke Grenze
                 CPI 10
                 BCS tsoutside         ; prüfe rechte Grenze     
               STA ptr2+0              ; beschreibe vram-pointer mit x-info
               INW ptr                 ; gehe zum shape-yoffset
-              LDS -2                  ; lade test-ypos
+              LDS 3                   ; lade test-ypos
               ADR ptr                 ; addiere shape-yoffset hinzu
               BMI tsoutside           ; prüfe obere Grenze
                 CPI 20
@@ -241,9 +230,9 @@ tsloop:       LDS -1                  ; lade test-xpos
                 INW ptr
                 DEB vari
                 BNE tsloop
-                  LDI 1 STS -1        ; return 'space is valid'
+                  LDI 1 STS 4 ; return 'space is valid'
                   RTS
-tsoutside:    LDI 0 STS -1            ; return 'space is invalid'
+tsoutside:    LDI 0 STS 4     ; return 'space is invalid'
               RTS
 
 RotateShape:  LDA xoff ADB xpos
@@ -262,130 +251,73 @@ rsloop:       LDR ptr PHS INW ptr
 PrintShape:   LDI >shape STA ptr+1
               LDI <shape STA ptr+0
               LDI 4 STA vari
-psloop:       LDA xpos ADI 14 ADR ptr STS -4
+psloop:       LDA xpos ADI 15 ADR ptr
+              PHS JPS _CursorX PLS
               INW ptr
-              LDA ypos ADR ptr STS -5
-              JPS CursorXY
-              LDA shapechar
-              OUT JPS WaitOnUART
-              INW ptr                   ; gehe zum nächsten Quadrat
+              LDA ypos INC ADR ptr
+              PHS JPS _CursorY PLS
+              LDA shapechar OUT JPS _WaitUART
+              INW ptr         ; next square
               DEB vari
               BNE psloop
                 RTS
 
-
-; **********************************************************************************************
-
-PrintField:   LDI 27 OUT JPS WaitOnUART 
-              LDI '[' OUT JPS WaitOnUART
-              LDI 'H' OUT JPS WaitOnUART
+PrintField:   LDI 27 OUT JPS _WaitUART 
+              LDI '[' OUT JPS _WaitUART
+              LDI 'H' OUT JPS _WaitUART
               LDI >vram STA ptr+1
               CLB ptr+0
               LDI 20 STA vary
-pflinestart:  LDI 27 OUT JPS WaitOnUART
-              LDI '[' OUT JPS WaitOnUART
-              LDI '1' OUT JPS WaitOnUART
-              LDI '4' OUT JPS WaitOnUART
-              LDI 'C' OUT JPS WaitOnUART
+pflinestart:  LDI 15 PHS JPS _CursorX PLS
               LDI 10 STA varx
 pfxloop:      LDR ptr 
-              OUT JPS WaitOnUART
+              OUT JPS _WaitUART
               INB ptr+0
               DEB varx
               BNE pfxloop
-                LDI 10 OUT JPS WaitOnUART
+                LDI 10 OUT JPS _WaitUART
                 DEB vary
                 BNE pflinestart
                   RTS              
 
-PrintFrame:   LDI 27 OUT JPS WaitOnUART
-              LDI '[' OUT JPS WaitOnUART
-              LDI 'H' OUT JPS WaitOnUART
-              LDI 27 OUT JPS WaitOnUART
-              LDI '[' OUT JPS WaitOnUART
-              LDI 'J' OUT JPS WaitOnUART
+PrintFrame:   LDI 27 OUT JPS _WaitUART
+              LDI '[' OUT JPS _WaitUART
+              LDI 'H' OUT JPS _WaitUART
+              LDI 27 OUT JPS _WaitUART
+              LDI '[' OUT JPS _WaitUART
+              LDI 'J' OUT JPS _WaitUART
               LDI 20 STA vary              
-pfrloop:      LDI 27 OUT JPS WaitOnUART
-              LDI '[' OUT JPS WaitOnUART
-              LDI '1' OUT JPS WaitOnUART
-              LDI '2' OUT JPS WaitOnUART
-              LDI 'C' OUT JPS WaitOnUART
-              LDI <textframe1 STS -3
-					    LDI >textframe1 STS -4
-					    JPS PrintText
+pfrloop:      LDI <textframe1 PHS
+					    LDI >textframe1 PHS
+					    JPS _Print PLS PLS
               DEB vary
               BNE pfrloop
-                LDI 27 OUT JPS WaitOnUART
-                LDI '[' OUT JPS WaitOnUART
-                LDI '1' OUT JPS WaitOnUART
-                LDI '2' OUT JPS WaitOnUART
-                LDI 'C' OUT JPS WaitOnUART
-                LDI <textframe2 STS -3
-                LDI >textframe2 STS -4
-                JPS PrintText
-                LDI 27 OUT JPS WaitOnUART
-                LDI '[' OUT JPS WaitOnUART
-                LDI '1' OUT JPS WaitOnUART
-                LDI '2' OUT JPS WaitOnUART
-                LDI 'C' OUT JPS WaitOnUART
-                LDI <textframe3 STS -3
-                LDI >textframe3 STS -4
-                JPS PrintText
+                LDI <textframe2 PHS
+                LDI >textframe2 PHS
+                JPS _Print PLS PLS
+                LDI <textframe3 PHS
+                LDI >textframe3 PHS
+                JPS _Print PLS PLS
                 RTS
 
-PrintIntro:   LDI 27 OUT JPS WaitOnUART
-              LDI '[' OUT JPS WaitOnUART
-              LDI 'H' OUT JPS WaitOnUART
-              LDI 27 OUT JPS WaitOnUART
-              LDI '[' OUT JPS WaitOnUART
-              LDI 'J' OUT JPS WaitOnUART
-              LDI 27 OUT JPS WaitOnUART
-              LDI '[' OUT JPS WaitOnUART
-              LDI '1' OUT JPS WaitOnUART
-              LDI '0' OUT JPS WaitOnUART
-              LDI 'B' OUT JPS WaitOnUART
-              LDI <tetristext STS -3
-					    LDI >tetristext STS -4
-					    JPS PrintText
+PrintIntro:   LDI <tetristext PHS
+					    LDI >tetristext PHS
+					    JPS _Print PLS PLS
               JPA PrintSpace
 
-PrintOver:    LDI 27 OUT JPS WaitOnUART
-              LDI '[' OUT JPS WaitOnUART
-              LDI 'H' OUT JPS WaitOnUART
-              LDI 27 OUT JPS WaitOnUART
-              LDI '[' OUT JPS WaitOnUART
-              LDI '1' OUT JPS WaitOnUART
-              LDI '0' OUT JPS WaitOnUART
-              LDI 'B' OUT JPS WaitOnUART
-              LDI 27 OUT JPS WaitOnUART
-              LDI '[' OUT JPS WaitOnUART
-              LDI '1' OUT JPS WaitOnUART
-              LDI '4' OUT JPS WaitOnUART
-              LDI 'C' OUT JPS WaitOnUART
-              LDI <overtext STS -3
-					    LDI >overtext STS -4
-					    JPS PrintText
-PrintSpace:   LDI 27 OUT JPS WaitOnUART
-              LDI '[' OUT JPS WaitOnUART
-              LDI '1' OUT JPS WaitOnUART
-              LDI '2' OUT JPS WaitOnUART
-              LDI 'B' OUT JPS WaitOnUART
-              LDI 27 OUT JPS WaitOnUART
-              LDI '[' OUT JPS WaitOnUART
-              LDI '1' OUT JPS WaitOnUART
-              LDI '3' OUT JPS WaitOnUART
-              LDI 'C' OUT JPS WaitOnUART
-              LDI <spacetext STS -3
-					    LDI >spacetext STS -4
-					    JPS PrintText
+PrintOver:    LDI <overtext PHS
+					    LDI >overtext PHS
+					    JPS _Print PLS PLS
+
+PrintSpace:   LDI <spacetext PHS
+					    LDI >spacetext PHS
+					    JPS _Print PLS PLS
               RTS 
 
-; **********************************************************************************************
-
-Randomize:    INB randomnum               ; Randomize the piece generator simply with time
+Randomize:    INB randomnum     ; Randomize with time
               CPI 7
               BCC randrts
-                CLB randomnum             ; overflow happened => back to shape #0
+                CLB randomnum   ; overflow
 randrts:      RTS
 
 Sleep:        CLB ptr+0 LDI 0x04 STA ptr+1
@@ -393,128 +325,47 @@ sloop:        DEW ptr
               BCS sloop
                 RTS
 
-; **********************************************************************************************
+; print out an unsigned 16-bit decimal number in the format 00000
+; push: number_lsb, number_msb
+; pull: #, #
+U16_Print:		  LDS 3 STA U16_C+1	; PRINT A POSITIVE NUMBER
+                LDS 4 STA U16_C+0
+                LDI 0 PHS STA U16_digits
+	U16_start:		CLB U16_C+2
+                LDI 16 STA U16_count
+	U16_shift:		LDA U16_C+2 ROL
+								LDA U16_C+0 ROL STA U16_C+0
+								LDA U16_C+1 ROL STA U16_C+1
+								LDA U16_C+2 ROL STA U16_C+2
+								CPI 10 BCC U16_done
+									ADI 118 STA U16_C+2
+	U16_done:		  DEB U16_count BNE U16_shift
+									LDA U16_C+2 LSL LSR
+                  ADI '0' PHS INB U16_digits
+									LDA U16_C+2 ROL
+									LDA U16_C+0 ROL STA U16_C+0
+									LDA U16_C+1 ROL STA U16_C+1
+									LDA U16_C+2 ROL STA U16_C+2
+                  LDI 0
+									CPA U16_C+0 BNE U16_start
+									  CPA U16_C+1 BNE U16_start
+  U16_before:         INB U16_digits CPI 6 BEQ U16_stack
+                        LDI '0' OUT JPS _WaitUART JPA U16_before
+  U16_stack:			    PLS CPI 0 BEQ U16_exit
+										    OUT JPS _WaitUART
+										    JPA U16_stack
+	U16_exit:			      RTS
 
-; **************************************************
-; ***** Schreibt einen nullterminierten String *****
-; **************************************************
-PrintText:	 	LDS -1 STA Print_ptr+0  		; get LSB
-            	LDS -2 STA Print_ptr+1 			; get MSB
-Printloop:  	LDR Print_ptr CPI 0	    		; Print routine
-							BEQ Printend          			; string zuende? => gib das Zeichen aus
-            	  OUT JPS WaitOnUART
-        		    INW Print_ptr         		; zeige auf das nächste Zeichen
-     		        JPA Printloop
-Printend:	  	RTS
+textframe1:   27, '[12C<!..........!>', 10, 0
+textframe2:   27, '[12C<!==========!>', 10, 0
+textframe3:   27, '[12C  VVVVVVVVVV  ', 10, 0
 
-; ********************************************************************************
-; ***** Set the cursor xy position (caller deposits x in SP-4 and y in SP-5) *****
-; ********************************************************************************
-CursorXY:     LDI 27 OUT JPS WaitOnUART             ; Bring cursor home
-              LDI '[' OUT JPS WaitOnUART
-              LDI 'H' OUT JPS WaitOnUART
-
-              LDS -2 CPI 0
-              BEQ CursorNoX
-                LDI 27 OUT JPS WaitOnUART
-                LDI '[' OUT JPS WaitOnUART
-                JPS CursorDec					              ; schreibe Anzahl x in DEC
-  							LDI 'C' OUT JPS WaitOnUART
-CursorNoX:    LDS -3 CPI 0
-              BEQ CursorNoY
-                STS -2
-                LDI 27 OUT JPS WaitOnUART
-                LDI '[' OUT JPS WaitOnUART
-                JPS CursorDec					              ; schreibe Anzahl y in DEC
-                LDI 'B' OUT JPS WaitOnUART
-CursorNoY:		RTS
-
-CursorDec:	LDS 0								    ; subroutine printing out SP-0 as a decimal number between 0 and 63
-            SBI 30
-            BCS Cursorprint3
-              ADI 10
-              BPL Cursorprint2
-                ADI 10
-                BPL Cursorprint1
-                  ADI 10
-CursorEiner:     	ADI '0'
-                  OUT
-                  NOP
-WaitOnUART:       NOP NOP NOP NOP NOP NOP NOP NOP
-							  	RTS
-Cursorprint3:	STS 0                 ; Einer sichern
-              LDI '3'   						; '3' ausgeben
-CursorZehner: OUT NOP NOP NOP NOP NOP NOP NOP NOP NOP
-              LDS 0                 ; Einer laden
-              JPA CursorEiner
-Cursorprint2:	STS 0
-              LDI '2'   						; '2' ausgeben
-							JPA CursorZehner
-Cursorprint1:	STS 0
-              LDI '1'   						; '1' ausgeben
-							JPA CursorZehner
-
-; **********************************************************************
-; ***** Print out a 16-bit UNSIGNED decimal number in format 00000 *****
-; **********************************************************************
-DecU16Print:		LDS -1 STA Dec16_A+0 STA Dec16_B+0
-								LDS -2 STA Dec16_A+1 STA Dec16_B+1
-                LDI '0'	STA Dec16_char
-DecU16next1:		LDA Dec16_A+0 STA Dec16_B+0 LDA Dec16_A+1 STA Dec16_B+1		; A -> B
-                LDI 0x10 SBW Dec16_B         ; LSB abziehen
-								BCC DecU16pos2	  					; Überlauf des 16-bit Registers?			
-                LDA Dec16_B+1 SBI 0x27
-                BCC DecU16pos2
-                  STA Dec16_A+1 LDA Dec16_B+0 STA Dec16_A+0
-									INB Dec16_char						; Ziffer erhöhen
-									JPA DecU16next1
-DecU16pos2:			LDA Dec16_char	            ; Stelle ausgeben
-                OUT JPS WaitOnUART
-                LDI '0'	STA Dec16_char
-DecU16next2:		LDA Dec16_A+0 STA Dec16_B+0 LDA Dec16_A+1 STA Dec16_B+1		; A -> B
-								LDI 0xe8 SBW Dec16_B
-                BCC DecU16pos3
-                LDA Dec16_B+1 SBI 0x03
-								BCC DecU16pos3
-									STA Dec16_A+1 LDA Dec16_B+0 STA Dec16_A+0
-									INB Dec16_char						; Ziffer erhöhen
-									JPA DecU16next2
-DecU16pos3:			LDA Dec16_char    	        ; Stelle ausgeben
-                OUT JPS WaitOnUART
-                LDI '0'	STA Dec16_char
-DecU16next3:		LDA Dec16_A+0 STA Dec16_B+0 LDA Dec16_A+1 STA Dec16_B+1		; A -> B
-								LDI 100 SBW Dec16_B
-								BCC DecU16pos4
-									LDA Dec16_B+1 STA Dec16_A+1 LDA Dec16_B+0 STA Dec16_A+0
-									INB Dec16_char						; Ziffer erhöhen
-									JPA DecU16next3
-DecU16pos4:			LDA Dec16_char    	        ; Stelle ausgeben
-                OUT JPS WaitOnUART
-                LDI '0'	STA Dec16_char			; 10er Stelle zurücksetzen			
-DecU16next4:		LDA Dec16_A									; hier muss nur noch das LSB betrachtet werden, da max. 100 drin sein kann
-								SBI 10											; subtrahiere Stellenwert
-								BCC DecU16pos5
-									STA Dec16_A
-									INB Dec16_char						; Ziffer hochzählen
-									JPA DecU16next4
-DecU16pos5:			LDA Dec16_char    	        ; Stelle ausgeben
-                OUT JPS WaitOnUART
-                LDA Dec16_A									; 1er-Stelle direkt ausgeben
-								ADI '0'
-                OUT JPS WaitOnUART
-								RTS
-
-; **********************************************************************************************
-
-textframe1:   '<!..........!>', 10, 0
-textframe2:   '<!==========!>', 10, 0
-textframe3:   '  VVVVVVVVVV  ', 10, 0
-
-tetristext:   ' M I N I M A L   U A R T   T E T R I S', 10, 0
-overtext:     'GAME  OVER', 10, 0
-spacetext:    'Press  SPACE', 10, 0
-scoretext:    'SCORE 00000', 0
-hightext:     'HIGH ', 0
+tetristext:   27, '[H', 27, '[J', 27
+              '[10B M I N I M A L   U A R T   B L O C K S', 10, 0
+overtext:     27, '[H', 27, '[10B', 27, '[14CGAME  OVER', 10, 0
+spacetext:    27, '[12B', 27, '[13C', 'Press  SPACE', 10, 0
+scoretext:    27, '[HSCORE 00000', 0
+hightext:     27, '[16CHIGH ', 0
 controltext:  10, 10, 10                     ; output text for keyboard controls
               'CONTROLS', 10, 10
               'A - Left', 10
@@ -522,51 +373,54 @@ controltext:  10, 10, 10                     ; output text for keyboard controls
               'W - Rotate', 10
               'S - Drop', 0
 
-highscore:    0x1ae0                              ; holding the current highscore 20.3.2021
-
-minos:        0,  0,  1,  0,  0, -1, 1, -1,   1  ; Quadrat   ; initial tetrominos with initial x-offset for SRS
+              ;  initial tetrominos with initial x-offset for SRS
+minos:        0,  0,  1,  0,  0, -1, 1, -1,   1  ; square
               -1, -1, 0,  -1, 0, 0,  1, 0,    0  ; Z
               -1, 0,  0,  0,  0, -1, 1, -1,   0  ; neg. Z
-              -1, 0,  0,  0,  1, 0,  2, 0,    1  ; Stab
-              -1, 0,  0,  0,  1, 0,  0, -1,   0  ; Podest
+              -1, 0,  0,  0,  1, 0,  2, 0,    1  ; slab
+              -1, 0,  0,  0,  1, 0,  0, -1,   0  ; pyramid
               -1, -1, -1, 0,  0, 0,  1, 0,    0  ; L
               -1, 0,  0,  0,  1, 0,  1, -1,   0  ; neg. L
 
-wintable:     0, 20, 50, 100, 250           ; points depending on the number of cleared rows (are added twice)
+wintable:     0, 20, 50, 100, 250     ; points depending on cleared rows (x2)
 
-              #end
+highscore:    0x1bca                  ; holding the current highscore 10.5.2021
 
-              #org 0xef00
-vram:         ; ab hier 20*10 bytes Video RAM
+#end
 
-              #org 0xefc8 
-Dec16_char:		'0'                           ; Variablen
-Dec16_A:			0, 0
-Dec16_B:			0, 0
+#org 0xef00   vram:                   ; 20*10 bytes Video RAM
 
-Print_ptr:		0, 0												  ; Zeiger der Funktion 'PrintText'            
+#org 0xefc8   ; variables
 
-shapechar:    0                             ; current look of a piece, either '#' or '.'
-shape:        0, 0, 0, 0, 0, 0, 0, 0        ; holding the current shape (and it's rotation state)
-xoff:         0                             ; offsets for SRS rotation compensation
+U16_C:        0xffff, 0xff            ; for U16_Print
+U16_count:    0xff
+U16_digits:   0xff
+
+shapechar:    0                       ; current look of a piece, either '#' or '.'
+shape:        0, 0, 0, 0, 0, 0, 0, 0  ; current shape (and it's rotation state)
+xoff:         0                       ; SRS rotation compensation
 yoff:         0
 
-state:        0         ; game state 0: intro, 1: running, 2: game over
+state:        0          ; 0: intro, 1: running, 2: over
 score:        0x0000     ; holding the current score 
-waiting:      0         ; timer 
-randomnum:    0         ; Random number generator
-gameframes:   0x0000     ; counting the game frames (1/60s)
-xpos:         0         ; current position of the tetromino
+waiting:      0          ; timer 
+randomnum:    0          ; Random number generator
+gameframes:   0x0000     ; counting the game frames
+xpos:         0          ; current position of tetromino
 ypos:         0    
 ptr:          0x0000     ; multi-purpose pointers
 ptr1:         0x0000
 ptr2:         0x0000
-vari:         0         ; multi-purpose variables for loops
+vari:         0          ; multi-purpose
 varx:         0
 vary:         0
-dropsteps:    0         ; counting the hard drop steps (for points)
-anzrows:      0         ; count the number of cleared lines
-rowfull:      0         ; boolean indicating whether a line was complete
+dropsteps:    0          ; counting hard drops
+anzrows:      0          ; count cleared lines
+rowfull:      0          ; boolean line completed
 
-							#begin
-;							#org 0x8000
+#end          ; use these OS API functions
+
+#org 0xf006   _Print:    ; Prints a null-terminated string
+#org 0xf00c   _WaitUART: ; Waits for UART transmission
+#org 0xf022   _CursorX:  ; set the cursor x position 1..60
+#org 0xf025   _CursorY:  ; set the cursor y position 1..25
