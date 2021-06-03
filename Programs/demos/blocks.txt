@@ -11,7 +11,7 @@
 game_restart: CLB state
               JPS PrintIntro
 
-game_loop:    LDI 27 OUT JPS _WaitUART   ; hide cursor
+game_loop:    LDI 27 OUT JPS _WaitUART    ; hide cursor
               LDI '[' OUT JPS _WaitUART
               LDI 'H' OUT JPS _WaitUART
               JPS Sleep                   ; refresh 1/60s
@@ -27,20 +27,20 @@ game_loop:    LDI 27 OUT JPS _WaitUART   ; hide cursor
 
 state_intro:  INP CPI 32               ; non-blocking key input
               BNE game_loop            ; immediate loop-back
-                LDI <vram STA ptr+0    ; GAME VORBEREITEN!!!
+                LDI <vram STA ptr+0
                 LDI >vram STA ptr+1    ; clear playfield
-cfloop:         LDI '.' STR ptr
+  cfloop:       LDI '.' STR ptr
                 INW ptr
                 LDA ptr+0
                 CPI 200
                 BCC cfloop                
                   CLW score            ; reset all game variables
-                  CLW gameframes       ; Spielzeit löschen
-                  LDI 80 STA waiting   ; Fall-timer initialisieren
+                  CLW gameframes
+                  LDI 80 STA waiting   ; fall timer init
                   CLB dropsteps
-                  JPS PrintFrame       ; Rahmen einmalig malen (mit leerem Spielfeld)
+                  JPS PrintFrame       ; print empty field
                   JPS NewShape         ; pick random shape to start with (no test required)
-                  LDI '#' STA shapechar JPS PrintShape       ; Tetromino malen
+                  LDI '#' STA shapechar JPS PrintShape       ; draw tetromino
                   LDI <scoretext PHS
                   LDI >scoretext PHS
                   JPS _Print PLS PLS
@@ -55,109 +55,104 @@ cfloop:         LDI '.' STR ptr
                   INB state            ; STATE = RUNNING!!!
                   JPA game_loop
 
-
-; ***** STATE RUN ***********************************************************************************
-
-state_run:    INW gameframes           ; Zeit weiterzählen  
-              DEB waiting              ; Tetromino fällt?
-              BPL run_keyboard
-                LDA gameframes+1       ; fall-timer 'waiting' neu setzen
+state_run:    INW gameframes           ; count time
+              DEB waiting              ; tetromino falling?
+              BPL run_keyb
+                LDA gameframes+1       ; set fall timer 'waiting'
                 LSR NEG ADI 80 STA waiting
                 LDA xpos PHS LDA ypos INC PHS
                 JPS TestShape PLS
-                PLS DEC BCC run_placeit                         ; Stelle BESETZT => Stein plazieren
-                  LDI '.' STA shapechar JPS PrintShape  ; Stelle war frei => Stein fällt runter und weiter
+                PLS DEC BCC run_place                   ; no space? place it here
+                  LDI '.' STA shapechar JPS PrintShape  ; free space? let it fall
                   INB ypos             
                   LDI '#' STA shapechar JPS PrintShape
 
-run_keyboard: INP BEQ game_loop                         ; Steuerung (non-blocking key input)
+  run_keyb:   INP BEQ game_loop                         ; non-blocking key input
               CPI 'a' BEQ a_key
               CPI 'd' BEQ d_key
               CPI 'w' BEQ w_key
               CPI 's' BEQ s_key
               JPA game_loop
 
-a_key:        LDI '.' STA shapechar JPS PrintShape
+  a_key:      LDI '.' STA shapechar JPS PrintShape
               LDA xpos DEC PHS LDA ypos PHS JPS TestShape PLS
               PLS SBB xpos
-              JPA run_drawshape
-d_key:        LDI '.' STA shapechar JPS PrintShape
+              JPA r_drshape
+  d_key:      LDI '.' STA shapechar JPS PrintShape
               LDA xpos INC PHS LDA ypos PHS JPS TestShape PLS
               PLS ADB xpos
-              JPA run_drawshape
-w_key:        LDI '.' STA shapechar JPS PrintShape  ; alte Shape löschen
-              JPS RotateShape                       ; rotierte shape erzeugen
-              LDA xpos PHS LDA ypos PHS JPS TestShape PLS PLS DEC BCS run_drawshape                  ; test position
-              LDA xpos INC STA xpos PHS LDA ypos PHS JPS TestShape PLS PLS DEC BCS run_drawshape     ; and possible wall kicks
-              LDA xpos SBI 2 STA xpos PHS LDA ypos PHS JPS TestShape PLS PLS DEC BCS run_drawshape
-              LDA xpos ADI 3 STA xpos PHS LDA ypos PHS JPS TestShape PLS PLS DEC BCS run_drawshape
-              LDA xpos SBI 4 STA xpos PHS LDA ypos PHS JPS TestShape PLS PLS DEC BCS run_drawshape
-                INB xpos           ; zurück auf Anfangsposition
+              JPA r_drshape
+  w_key:      LDI '.' STA shapechar JPS PrintShape  ; delete old shape
+              JPS RotateShape                       ; make rotate shape
+              LDA xpos PHS LDA ypos PHS JPS TestShape PLS PLS DEC BCS r_drshape                  ; test position
+              LDA xpos INC STA xpos PHS LDA ypos PHS JPS TestShape PLS PLS DEC BCS r_drshape     ; and possible wall kicks
+              LDA xpos SBI 2 STA xpos PHS LDA ypos PHS JPS TestShape PLS PLS DEC BCS r_drshape
+              LDA xpos ADI 3 STA xpos PHS LDA ypos PHS JPS TestShape PLS PLS DEC BCS r_drshape
+              LDA xpos SBI 4 STA xpos PHS LDA ypos PHS JPS TestShape PLS PLS DEC BCS r_drshape
+                INB xpos           ; back to beginning
                 INB xpos
-                JPS RotateShape    ; Rotation war nicht frei => zurückdrehen
+                JPS RotateShape    ; rotation wasn't free -> rotate back
                 JPS RotateShape
                 JPS RotateShape
-                JPA run_drawshape
-s_key:        JPS Randomize
+                JPA r_drshape
+  s_key:      JPS Randomize
               INB dropsteps
               LDI -1 STA waiting
               JPA game_loop
 
-run_drawshape:LDI '#' STA shapechar JPS PrintShape
+  r_drshape:  LDI '#' STA shapechar JPS PrintShape
               JPA game_loop
 
-run_placeit:  LDI <shape STA ptr+0
+  run_place:  LDI <shape STA ptr+0
               LDI >shape STA ptr+1
               LDI >vram STA ptr2+1
               LDI 4 STA vari
-rploop:       LDA xpos                ; SCHREIBE DIE FORM INS VRAM
-              ADR ptr                 ; addiere shape-xoffset hinzu
-              STA ptr2+0              ; beschreibe vram-pointer mit x-info
-              INW ptr                 ; gehe zum shape-yoffset
+  rploop:     LDA xpos                ; DRAW SHAPE TO VRAM
+              ADR ptr                 ; add shape xoffset
+              STA ptr2+0              ; write x info
+              INW ptr                 ; goto shape yoffset
               LDA ypos
-              ADR ptr                 ; addiere shape-yoffset hinzu
-              LSL PHS ADW ptr2        ; addiere y x 2 zum vram-pointer, Vorsicht, ADW ist nicht A-erhaltend
+              ADR ptr                 ; add shape yoffset
+              LSL PHS ADW ptr2        ; add y x 2 zum vram-pointer
               PLS LSL LSL ADW ptr2
-              LDI '#' STR ptr2        ; schreibe ins VRAM
+              LDI '#' STR ptr2        ; write to VRAM
               INW ptr
               DEB vari
               BNE rploop
-                CLB anzrows           ; Anzahl der vollen Reihen auf 0 setzen
+                CLB anzrows
                 LDI 10 STA ptr2+0     ; start of VRAM = Anfang Reihe 1
-                LDI >vram STA ptr+1   ; später auch 'ptr' zum Löschen verwenden... (dst)
-                STA ptr1+1            ; später auch 'ptr1' zum Löschen verwenden... (src)
-                LDI 19 STA vary       ; 19 Reihen testen
-rpyloop:      LDI 1 STA rowfull       ; nimm an, die Reihe sei voll 
+                LDI >vram STA ptr+1
+                STA ptr1+1
+                LDI 19 STA vary       ; test 19 rows
+  rpyloop:    LDI 1 STA rowfull       ; assume row is full
               LDI 10 STA varx
-rpxloop:      LDI '.' CPR ptr2
+  rpxloop:    LDI '.' CPR ptr2
               BNE rpiswall 
-                CLB rowfull           ; markiere diese Reihe als 'nicht leer'!
-rpiswall:     INB ptr2
+                CLB rowfull           ; mark row as not empty
+  rpiswall:   INB ptr2
               DEB varx
               BNE rpxloop
                 LDA rowfull DEC
                 BCC rpcopydone
-                  INB anzrows         ; diese Reihe war voll!
-                  LDA ptr2+0 DEC STA ptr+0  ; Ende der vollen Reihe -> ptr = destination
-                  SBI 10 STA ptr1+0   ; ptr1 = source eine Reihe darüber                  
-rpcopyloop:       LDR ptr1 STR ptr    ; Wert von darüber nach darunter kopieren
+                  INB anzrows         ; row is full
+                  LDA ptr2+0 DEC STA ptr+0
+                  SBI 10 STA ptr1+0
+  rpcopyloop:     LDR ptr1 STR ptr
                   DEB ptr DEB ptr1
                   BCS rpcopyloop
-rpleerloop:         INB ptr1
+  rpleerloop:       INB ptr1
                     CPI 10
                     BCC rpcopydone
                     LDI '.' STR ptr1
                     JPA rpleerloop
-rpcopydone:     DEB vary
+  rpcopydone:   DEB vary
                 BNE rpyloop
                   LDI >wintable STA ptr+1 LDI <wintable STA ptr+0
                   LDA anzrows ADW ptr
                   LDR ptr ADW score LDR ptr ADW score  ; add score for cleared rows
                   LDA dropsteps ADW score              ; add the drop points
-                  LDI 27 OUT JPS _WaitUART
-                  LDI '[' OUT JPS _WaitUART
-                  LDI '6' OUT JPS _WaitUART
-                  LDI 'C' OUT JPS _WaitUART
+                  LDI <pretext PHS LDI >pretext PHS
+                  JPS _Print PLS PLS
                   LDA score+0 PHS LDA score+1 PHS
                   JPS U16_Print PLS PLS ; print score
                   LDA score+1           ; check if there is a new highscore
@@ -167,10 +162,10 @@ rpcopydone:     DEB vary
                     LDA score+0
                     CPA highscore+0
                     BCC rpnewshape
-rpnewhigh:            LDA score+0 STA highscore+0   ; score = highscore
+  rpnewhigh:          LDA score+0 STA highscore+0   ; score = highscore
                       LDA score+1 STA highscore+1
 
-rpnewshape:     CLB dropsteps
+  rpnewshape:   CLB dropsteps
                 JPS NewShape            ; pick random shape
                 JPS PrintField          ; draw field
                 JPS PrintShape          ; Tetromino malen
@@ -180,14 +175,9 @@ rpnewshape:     CLB dropsteps
                   JPS PrintOver
                   JPA game_loop
 
-
-; ***** STATE OVER *****************************************************************************
-
 state_over:   INP CPI 32
               BNE game_loop
                 JPA game_restart
-
-; **********************************************************************************************
 
 NewShape:     LDI <shape STA ptr2+0  ; copy a random piece into shape
               LDI >shape STA ptr2+1
@@ -196,7 +186,7 @@ NewShape:     LDI <shape STA ptr2+0  ; copy a random piece into shape
               LDA randomnum LSL LSL LSL ADA randomnum   ; x 9
               ADW ptr
               LDI 8 STA vari
-nscopyloop:   LDR ptr STR ptr2
+  nscopyloop: LDR ptr STR ptr2
               INW ptr INW ptr2
               DEB vari
               BNE nscopyloop
@@ -210,7 +200,7 @@ TestShape:    LDI <shape STA ptr+0    ; test if pos is free
               LDI >shape STA ptr+1
               LDI >vram STA ptr2+1
               LDI 4 STA vari
-tsloop:       LDS 4                   ; lade test-xpos
+  tsloop:     LDS 4                   ; lade test-xpos
               ADR ptr                 ; addiere shape-xoffset hinzu
               BMI tsoutside           ; prüfe linke Grenze
                 CPI 10
@@ -232,7 +222,7 @@ tsloop:       LDS 4                   ; lade test-xpos
                 BNE tsloop
                   LDI 1 STS 4 ; return 'space is valid'
                   RTS
-tsoutside:    LDI 0 STS 4     ; return 'space is invalid'
+  tsoutside:  LDI 0 STS 4     ; return 'space is invalid'
               RTS
 
 RotateShape:  LDA xoff ADB xpos
@@ -240,7 +230,7 @@ RotateShape:  LDA xoff ADB xpos
               LDI 5 STA vari
               LDI >shape STA ptr+1
               LDI <shape STA ptr+0
-rsloop:       LDR ptr PHS INW ptr
+  rsloop:     LDR ptr PHS INW ptr
               LDR ptr PHS DEW ptr
               PLS STR ptr INW ptr
               PLS NEG STR ptr INW ptr
@@ -251,7 +241,7 @@ rsloop:       LDR ptr PHS INW ptr
 PrintShape:   LDI >shape STA ptr+1
               LDI <shape STA ptr+0
               LDI 4 STA vari
-psloop:       LDA xpos ADI 15 ADR ptr
+  psloop:     LDA xpos ADI 15 ADR ptr
               PHS JPS _CursorX PLS
               INW ptr
               LDA ypos INC ADR ptr
@@ -268,26 +258,22 @@ PrintField:   LDI 27 OUT JPS _WaitUART
               LDI >vram STA ptr+1
               CLB ptr+0
               LDI 20 STA vary
-pflinestart:  LDI 15 PHS JPS _CursorX PLS
+  pflinstart: LDI 15 PHS JPS _CursorX PLS
               LDI 10 STA varx
-pfxloop:      LDR ptr 
+  pfxloop:    LDR ptr 
               OUT JPS _WaitUART
               INB ptr+0
               DEB varx
               BNE pfxloop
                 LDI 10 OUT JPS _WaitUART
                 DEB vary
-                BNE pflinestart
+                BNE pflinstart
                   RTS              
 
-PrintFrame:   LDI 27 OUT JPS _WaitUART
-              LDI '[' OUT JPS _WaitUART
-              LDI 'H' OUT JPS _WaitUART
-              LDI 27 OUT JPS _WaitUART
-              LDI '[' OUT JPS _WaitUART
-              LDI 'J' OUT JPS _WaitUART
+PrintFrame:   LDI <clrtext PHS LDI >clrtext PHS
+              JPS _Print PLS PLS              
               LDI 20 STA vary              
-pfrloop:      LDI <textframe1 PHS
+  pfrloop:    LDI <textframe1 PHS
 					    LDI >textframe1 PHS
 					    JPS _Print PLS PLS
               DEB vary
@@ -318,10 +304,10 @@ Randomize:    INB randomnum     ; Randomize with time
               CPI 7
               BCC randrts
                 CLB randomnum   ; overflow
-randrts:      RTS
+  randrts:    RTS
 
 Sleep:        CLB ptr+0 LDI 0x04 STA ptr+1
-sloop:        DEW ptr
+  sloop:      DEW ptr
               BCS sloop
                 RTS
 
@@ -366,6 +352,8 @@ overtext:     27, '[H', 27, '[10B', 27, '[14CGAME  OVER', 10, 0
 spacetext:    27, '[12B', 27, '[13C', 'Press  SPACE', 10, 0
 scoretext:    27, '[HSCORE 00000', 0
 hightext:     27, '[16CHIGH ', 0
+pretext:      27, '[6C', 0
+clrtext:      27, '[H', 27, '[J', 0
 controltext:  10, 10, 10                     ; output text for keyboard controls
               'CONTROLS', 10, 10
               'A - Left', 10
