@@ -26,12 +26,12 @@ WHAT YOU GET:
   
   ● Source code of the minimal operating system MinOS and several demos and games
   
-  ● Cross-assembler 'asm.exe' running on Windows to comfortably write, assemble and upload your own software
+  ● Cross-assembler 'asm.exe' running on Windows (or Python) to comfortably write, assemble and upload your own software
   
 
 TECHNICAL SPECIFICATION:
   
-  ● Comparable to Altair 8800 or Apple 1  
+  ● Processing power (approx. 0.5Mips @ 3,6864MHz) comparable to C64 or Apple II
   
   ● Clear(est?) and simple(st? – you judge!) design for fun and education
   
@@ -39,17 +39,15 @@ TECHNICAL SPECIFICATION:
   
   ● 64 instructions (conditional branching, subroutines, stack and word ops)
   
-  ● 1,8432MHz clock with 0.25Mips (Altair 8800: 0.29Mips, Apple 1: 0.43Mips)
-  
-  ● 32KB RAM / 32KB FLASH ROM (OS, memory monitor, disassembler, tools)
+  ● 32KB RAM / 512KB FLASH ROM (OS, memory monitor, disassembler, tools)
   
   ● SSD file system (commands LOAD, SAVE, DIR, DELETE, FORMAT as you'd expect)
   
-  ● UART interface (115.2kbps) for terminal display, keyboard input and file I/O
+  ● UART interface (up to 230.4kbps) for terminal display, keyboard input and file I/O
   
   ● 16 control signals, 2 registers A and B, ALU (arithmetic and logic unit) = simple adder, 3 flags (negative, carry and zero)
   
-  ● Built from 74HCxx TTL logic on 115mm x 175mm PCB
+  ● Built from 74HCxx TTL logic on 120mm x 190mm PCB
   
 
 I hope you find this information useful, educational or otherwise interesting. I'd love to hear about you build, so meet me on YouTube.
