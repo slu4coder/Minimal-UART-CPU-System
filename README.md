@@ -1,8 +1,9 @@
-# Minimal UART CPU System - Revision 1.5 coming soon!
+# Minimal UART CPU System - Revision 1.5 out now!
 
 NEWS: User Manual: https://docs.google.com/document/d/1c2ZHtLd1BBAwcBAjBZZJmCA3AXpbpv80dlAtsMYpuF4/edit?usp=sharing
 
-NEWS: There is a new revision 1.5 coming soon featuring 512KB FLASH SSD, 3.6864MHz clock speed and an expansion port!
+NEWS: There is a new revision 1.5 out now featuring 512KB FLASH SSD, 3.6864MHz clock speed and an expansion port!
+
 
 NEWS: Minimal Python Assembler released: https://www.youtube.com/watch?v=rdKX9hzA2lU
 
