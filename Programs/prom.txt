@@ -1,0 +1,78 @@
+; In-situ FLASH ROM (OS) programmer for the Minimal CPU System
+; written by Carsten Herting (slu4) 2021
+; Usage: Load OS image into memory area 0xe000-0xefff and run this program.
+; Following an input promt, the image will be written to
+; 0x0000-0x0fff and the system will restart at 0x0000.
+
+#org 0x8000
+                  LDI <string STS -3		                      ; put LSB of string address on the stack
+      					  LDI >string STS -4		                      ; put MSB of string address on the stack
+		      			  JPS OS_PrintText
+  waitchar:       INP BEQ waitchar                  
+                  CPI 'y' BNE _Prompt                         ; jump back to current OS
+
+                  LDI 0 BNK                                   ; switch to bank zero (OS)
+                  CLW target                                  ; set target to 0x0000 ROM start
+                  LDI <romimage STA source+0                  ; source = ROM image in RAM
+                  LDI >romimage STA source+1
+
+                  LDI 0xaa STA 0x5555                         ; issue FLASH ERASE COMMAND
+                  LDI 0x55 STA 0x2aaa
+                  LDI 0x80 STA 0x5555
+                  LDI 0xaa STA 0x5555
+                  LDI 0x55 STA 0x2aaa
+                  LDI 0x30 STA 0x0000                         ; erase FLASH block 0 (aka ROM area)
+erase_loop:       LDA 0x0000 LSL BCC erase_loop               ; wait while 8th bit remains LOW
+
+write_loop:       LDI 0xaa STA 0x5555                         ; INIT FLASH WRITE PROGRAM
+                  LDI 0x55 STA 0x2aaa
+                  LDI 0xa0 STA 0x5555
+                  LDR source STR target			  						    ; write into FLASH
+                  NOP NOP NOP NOP                             ; wait 20µs (byte prog time max. 20µs)
+                  CPR target BNE writeerror                   ; RM vom FLASH okay?
+                    INW source INW target                     ; increase both pointers to next location
+                    LDA target+1 CPI 0x10 BCC write_loop
+                      JPA 0x0000                              ; SUCCESS => jump to new ROM
+writeerror:       LDI '?' OUT NOP NOP NOP NOP NOP NOP NOP NOP ; FAILURE => try to jump to ROM 'OS_LineStart' anyway
+                    JPA _Prompt                               ; jump back to the current OS in RAM
+
+OS_PrintText: 	  LDS -1 STA source+0
+            		  LDS -2 STA source+1 	         	            ; get LSB and MSB
+  printloop:  	  LDR source CPI 0	    	                    ; 15 Print routine
+								  BEQ printend          		                  ; 5(6) string zuende?
+            	    	OUT NOP NOP NOP NOP NOP NOP NOP NOP       ; 122
+        		      	INW source         		                    ; 12 zeige auf das nächste Zeichen
+     		          	JPA printloop                             ; 6
+  printend:	  	  RTS
+
+string: 	        'Copy 0xe000-0xefff to 0x0000 y/n?', 10, 0
+
+                  #end
+source:           0xffff           ; pointers used to copy the ROM image to the FLASH area
+target:           0xffff           ; will start at 0x0000
+
+#org 0xe000       romimage:       ; upload the new ROM image here
+#org 0xf003       _Prompt:        ; failure => jump vector to OS line input
+                  #begin
+;#org 0x8000
+
+; -------------------------------------------------------------------------------
+; Copyright (c) 2021 Carsten Herting (slu4)
+; -------------------------------------------------------------------------------
+; MIT LICENSE
+; Permission is hereby granted, free of charge, to any person obtaining a copy of
+; this software and associated  documentation files  (the "Software"), to deal in
+; the Software without  restriction, including  without  limitation the rights to
+; use, copy,  modify, merge, publish, distribute, sublicense,  and/or sell copies
+; of the Software, and  to permit persons to whom the Software is furnished to do
+; so, subject to the following conditions:
+; The above copyright notice and  this permission notice shall be included in all
+; copies or substantial portions of the Software.
+; THE  SOFTWARE  IS PROVIDED "AS IS",  WITHOUT  WARRANTY OF  ANY KIND, EXPRESS OR
+; IMPLIED,  INCLUDING  BUT  NOT  LIMITED  TO  THE  WARRANTIES OF MERCHANTABILITY,
+; FITNESS FOR  A PARTICULAR  PURPOSE AND  NONINFRINGEMENT. IN NO  EVENT SHALL THE
+; AUTHORS  OR  COPYRIGHT  HOLDERS  BE  LIABLE FOR  ANY  CLAIM, DAMAGES  OR  OTHER
+; LIABILITY,  WHETHER IN AN ACTION  OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+; OUT OF OR IN  CONNECTION WITH  THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+; SOFTWARE.
+; -------------------------------------------------------------------------------
