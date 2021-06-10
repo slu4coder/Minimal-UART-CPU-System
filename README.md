@@ -1,5 +1,7 @@
 # Minimal UART CPU System - Revision 1.5 Out Now!
 
+NEWS: Native assembler and text editor released!
+
 NEWS: User Manual and Reference: https://docs.google.com/document/d/1c2ZHtLd1BBAwcBAjBZZJmCA3AXpbpv80dlAtsMYpuF4/edit?usp=sharing
 
 NEWS: There is a new revision 1.5 out now featuring 512KB FLASH SSD, 3.6864MHz clock speed and an expansion port!
