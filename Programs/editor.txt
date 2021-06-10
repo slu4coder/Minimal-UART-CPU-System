@@ -1,0 +1,769 @@
+; ************************************************
+; Minimal Text Editor for the 'Minimal CPU System'
+; written by Carsten Herting 7.5.2021 - 3.6.2021
+; ************************************************
+#org 0x8000
+
+Editor:       LDI 0xfe STA 0xffff
+              DEB iscold BNE warmstart
+                CLB data                            ; invalidate text data
+                LDI 56 STA cols                     ; default: use line numbers
+  warmstart:  CLB iscold
+              CLW copysize                        ; invalidate copybuffer
+
+  mainload:   CLW markptr                         ; jump here after LOAD
+              CLB cptr+0 CLB tptr+0
+              LDI >data STA cptr+1 STA tptr+1
+              CLW xcur                            ; = CLB xcur CLB ycur
+              CLB xorg
+              CLW yorg INW yorg                   ; yorg = 1
+              CLB changed
+              LDI 3 STA redraw
+
+  lookname:   LDR _ParsePtr CPI 32 BCC nofilename BNE loadfile
+                INW _ParsePtr JPA lookname
+  loadfile:   LDI <_InpBuf STA namestart+0 STA pu_dptr+0   ; use as start
+              LDI >_InpBuf STA namestart+1 STA pu_dptr+1
+    cn_loop:  LDR _ParsePtr CPI 32 BCC endname
+                STR pu_dptr INW _ParsePtr INW pu_dptr
+                JPA cn_loop
+  endname:    LDI 0 STR pu_dptr
+              LDA pu_dptr+0 STA _ParsePtr+0                   ; use new end
+              LDA pu_dptr+1 STA _ParsePtr+1
+              LDA namestart+0 PHS LDA namestart+1 PHS
+              JPS _LoadFile PLS PLS CPI 0x80 BCS loaddone
+                LDI '?' OUT JPS _WaitUART
+                LDI 10 OUT JPS _WaitUART
+                JPA _Prompt
+
+  nofilename: CLB _InpBuf                         ; jump here after NEW, clear is necessary since command line is changed
+              LDI <_InpBuf STA namestart+0 STA _ParsePtr+0
+              LDI >_InpBuf STA namestart+1 STA _ParsePtr+1
+
+  loaddone:   JPS pullline
+
+  mainclear:  CLB state
+  mainloop:   LDA redraw CPI 0 BEQ nothing        ; speed up char receiving when nothing has changed
+                JPS Update                        ; main loop
+    nothing:  LDA input STA lastinp               ; save previous input
+    waitinp:  INP BEQ waitinp STA input
+              LDA state
+              CPI 0 BEQ StateChar
+              CPI 27 BEQ StateESC
+              CPI '[' BEQ StateCSI
+              CPI 0x0e BEQ StateNew
+              CPI 0x0c BEQ StateLoad
+              CPI 0x13 BEQ StateSave
+              CPI '~' BEQ StatePad
+              STA lastinp                           ; save the last input for '~' CSI
+              JPA mainclear
+
+Update:       LDA xcur INC SBA cols BCC ud_usexorg          ; only call this if redraw != 0
+                CPA xorg BCS ud_usexmin
+  ud_usexorg: LDA xorg
+  ud_usexmin: CPA xcur BCC ud_useit
+                LDA xcur
+  ud_useit:   CPA xorg BEQ ud_notnew
+                STA xorg
+                JPS pushline
+                LDI 3 STA redraw
+
+  ud_notnew:  LDA redraw
+              CPI 1 BEQ ud_return
+              CPI 2 BEQ ud_lindraw
+
+  ud_redraw:    LDI <ud_homestr PHS LDI >ud_homestr PHS       ; redraw the whole screen
+                JPS _Print PLS PLS
+                LDA cols CPI 60 BEQ ud_over1
+                  LDA yorg+0 PHS LDA yorg+1 PHS JPS Print999 PLS PLS
+    ud_over1:   LDI 25 STA pc_n
+                LDA tptr+0 STA pc_ptr+0 STA pc_sptr+0
+                LDA tptr+1 STA pc_ptr+1 STA pc_sptr+1
+  ud_while:     LDA pc_n CPI 0 BEQ ud_return
+                LDR pc_ptr CPI 0 BEQ ud_return
+                  STA pc_m CPI 10 BNE ud_notret
+                    LDA pc_n CPI 2 BCC ud_dontprint
+                      LDI 10 OUT JPS _WaitUART
+                      LDA cols CPI 60 BEQ ud_dontprint
+                        LDA yorg+0 STA pu_len+0
+                        LDA yorg+1 STA pu_len+1
+                        LDI 26 SBA pc_n ADW pu_len
+                        LDA pu_len+0 PHS LDA pu_len+1 PHS JPS Print999 PLS PLS
+  ud_dontprint:       INW pc_ptr
+                      LDA pc_ptr+0 STA pc_sptr+0
+                      LDA pc_ptr+1 STA pc_sptr+1
+                      DEB pc_n
+                      JPA ud_while
+  ud_notret:      LDA pc_ptr+0 SBA pc_sptr+0
+                  CPA xorg BCC ud_notprint
+                  SBA cols BCC ud_print
+                    SBA xorg BCS ud_notprint
+  ud_print:           LDA pc_m OUT JPS _WaitUART
+  ud_notprint:    INW pc_ptr
+                  JPA ud_while
+
+  ud_lindraw:   LDI <ud_clrstr PHS LDI >ud_clrstr PHS         ; case 2: draw current line only
+                JPS _Print PLS PLS                            ; clear current line
+                LDA cols CPI 60 BEQ ud_over2
+                  LDA yorg+0 STA pu_len+0
+                  LDA yorg+1 STA pu_len+1
+                  LDA ycur ADW pu_len
+                  LDA pu_len+0 PHS LDA pu_len+1 PHS JPS Print999 PLS PLS
+  ud_over2:     CLB pc_ptr+0 LDI >line STA pc_ptr+1 ; pc_ptr -> line buffer start
+  ud_while2:    LDR pc_ptr STA pc_m
+                CPI 0 BEQ ud_return
+                CPI 10 BEQ ud_return
+                  LDA pc_ptr+0 CPA xorg BCC ud_notprnt
+                    SBA cols BCC ud_doprnt
+                      CPA xorg BCS ud_notprnt
+  ud_doprnt:      LDA pc_m OUT JPS _WaitUART
+  ud_notprnt:   INB pc_ptr+0
+                JPA ud_while2
+  ud_return:  LDA ycur INC PHS JPS _CursorY PLS
+              LDA xcur SBA xorg INC PHS
+              LDA cols CPI 60 BEQ ud_bleibt
+                PLS ADI 4 PHS
+  ud_bleibt:  JPS _CursorX PLS
+              CLB redraw
+              RTS
+
+StateChar:  LDA input
+              CPI 13 BEQ mainloop                     ; ignore CR
+
+              CPI 27 BNE pc_next62                    ; ESC - state
+                STA state JPA mainloop
+
+  pc_next62:  CPI 0x1a BNE pc_next52                  ; Ctrl + Z
+                JPS pushline
+                LDA cols CPI 60 BNE pc_cols56
+                  LDI 56 STA cols JPA pc_colsend
+    pc_cols56:  LDI 60 STA cols
+    pc_colsend: JPA pc_reuse3
+
+  pc_next52:  CPI 0x01 BNE pc_next42                  ; Ctrl + A
+                LDA cptr+0 STA markptr+0
+                LDA cptr+1 STA markptr+1
+                LDA xcur STA markx ADW markptr        ; save current cursor position
+                LDA ycur STA marky                    ; save cursor x/y
+                LDA tptr+0 STA marktptr+0             ; save tptr
+                LDA tptr+1 STA marktptr+1
+                LDA yorg+0 STA markyorg+0             ; save yorg
+                LDA yorg+1 STA markyorg+1
+                JPA mainloop
+
+  pc_next42:  CPI 0x18 BNE pc_next12                  ; Ctrl + X
+                JPS pushline                          ; update data with current line
+                JPS CopyMarked
+                LDI 0 CPA copysize+0 BNE pc_n42ok
+                  CPA copysize+1 BEQ mainloop         ; has something been saved?
+    pc_n42ok:       LDA cptr+0 STA pc_sptr+0
+                    LDA cptr+1 STA pc_sptr+1
+                    LDA xcur ADW pc_sptr                ; pc_sptr = current cursor position
+                    LDI 0 PHS LDA pc_sptr+0 PHS LDA pc_sptr+1 PHS
+                    JPS length PLS                      ; get rest length of text to shift
+                    PLS STA pc_ptr+1 PLS STA pc_ptr+0 INW pc_ptr  ; pc_ptr = number of bytes to shift (incl. 0)
+                    LDA markptr+0 PHS LDA markptr+1 PHS ; push destination
+                    LDA pc_sptr+0 PHS LDA pc_sptr+1 PHS ; push sources
+                    LDA pc_ptr+0 PHS LDA pc_ptr+1 PHS   ; push number of bytes to move
+                    JPS _MemMove LDI 6 ADW 0xffff       ; move and clean up stack
+                LDA marktptr+0 STA tptr+0 LDA marktptr+1 STA tptr+1
+                LDA markyorg+0 STA yorg+0 LDA markyorg+1 STA yorg+1
+                LDA markptr+0 STA cptr+0 LDA markptr+1 STA cptr+1
+                LDA markx STA xcur SBW cptr LDA marky STA ycur
+  pc_reuse1:    CLW markptr
+  pc_reuse2:    JPS pullline
+  pc_reuse3:    LDI 3 STA redraw
+                JPA mainloop
+
+  pc_next12:  CPI 0x03 BNE pc_next22                  ; Ctrl + C
+                JPS pushline
+                JPS CopyMarked
+                CLW markptr
+                JPA mainloop
+
+  pc_next22:  CPI 0x16 BNE pc_next32                  ; Ctrl + V
+                JPS pushline
+                LDA cptr+0 STA pc_ptr+0 LDA cptr+1 STA pc_ptr+1
+                LDA xcur ADW pc_ptr                   ; pc_ptr = address of current cursor position in the line
+                LDI 0 PHS                             ; find remaining data length
+                LDA pc_ptr+0 STA pc_dptr+0 PHS
+                LDA pc_ptr+1 STA pc_dptr+1 PHS        ; pc_dptr = address of current cursor position in the line
+                JPS length PLS
+                PLS STA pc_sptr+1 PLS STA pc_sptr+0 INW pc_sptr  ; pc_sptr = number of textbytes that need shifting
+                LDA copysize+1 ADB pc_dptr+1 LDA copysize+0 ADW pc_dptr+0   ; pc_dptr = shift destination
+                LDA pc_dptr+0 PHS LDA pc_dptr+1 PHS   ; push destination
+                LDA pc_ptr+0 PHS LDA pc_ptr+1 PHS     ; push source
+                LDA pc_sptr+0 PHS LDA pc_sptr+1 PHS   ; push anzahl
+                JPS _MemMove LDI 6 ADW 0xffff         ; move and stack cleanup
+                LDA pc_ptr+0 PHS LDA pc_ptr+1 PHS     ; push destination
+                LDI <copy PHS STA pc_sptr+0           ; push source
+                LDI >copy PHS STA pc_sptr+1
+                LDA copysize+0 PHS STA pu_len+0       ; push anzahl
+                LDA copysize+1 PHS STA pu_len+1
+                JPS _MemMove LDI 6 ADW 0xffff         ; move and stack cleanup
+
+    pc22loop:   DEW pu_len BCC pc_reuse1
+                  LDR pc_sptr CPI 10 BEQ pc22enter
+                    INB xcur JPA pc22done
+    pc22enter:    CLB xcur
+                  LDA cptr+0 PHS LDA cptr+1 PHS
+                  JPS getnext
+                  PLS STA cptr+1 PLS STA cptr+0
+                  LDA ycur CPI 24 BCS pc22doorg
+                    INB ycur JPA pc22done
+    pc22doorg:    INW yorg
+                  LDA tptr+0 PHS LDA tptr+1 PHS
+                  JPS getnext
+                  PLS STA tptr+1 PLS STA tptr+0
+    pc22done:       INW pc_sptr JPA pc22loop
+
+  pc_next32:  CPI 0x11 BNE pc_next11                  ; Ctrl + Q
+                JPS pushline
+                JPA _Start
+
+  pc_next11:  CPI 0x0c BNE pc_next21                  ; Ctrl + L
+                STA state
+                JPS pushline
+                LDI <loadstr PHS LDI >loadstr PHS
+                JPS _Print PLS PLS
+                LDA namestart+0 PHS LDA namestart+1 PHS
+                JPS _Print PLS PLS
+                JPA mainloop
+
+  pc_next21:  CPI 0x13 BNE pc_next31                  ; Ctrl + S
+                STA state
+                JPS pushline
+                LDI <savestr PHS LDI >savestr PHS
+                JPS _Print PLS PLS
+                LDA namestart+0 PHS LDA namestart+1 PHS
+                JPS _Print PLS PLS
+                JPA mainloop
+
+  pc_next31:  CPI 0x0e BNE pc_next2                   ; Ctrl + N
+                STA state
+                JPS pushline
+                LDI <newstr PHS LDI >newstr PHS
+                JPS _Print PLS PLS
+                JPA mainloop
+
+  pc_next2:   CPI 8 BNE pc_next3                      ; BACKSPACE 8
+                CLW markptr
+                LDI 2 STA redraw
+                LDA xcur CPI 0 BEQ pc_8else
+                  DEB xcur PHS LDI >line PHS          ; case "xcur > 0"
+                  JPS cutchar PLS PLS
+                  LDI 1 STA changed
+                  JPA mainloop
+    pc_8else:   LDA cptr+0 PHS LDA cptr+1 PHS JPS getprev   ; case "xcur = 0"
+                PLS STA pc_ptr+1 PLS STA pc_ptr+0           ; pc_ptr = prev
+                CPA cptr+0 BNE pc_8if
+                  LDA pc_ptr+1 CPA cptr+1 BEQ mainloop
+    pc_8if:         JPS pushline                            ; prev != cptr -> alles okay
+                    LDI 10 PHS LDA pc_ptr+0 PHS LDA pc_ptr+1 PHS
+                    JPS length PLS PLS PLS STA pc_n         ; pc_n = length of prev exclusive return
+                    LDI 10 PHS LDA cptr+0 PHS LDA cptr+1 PHS
+                    JPS length PLS PLS PLS                  ; length of cptr exclusive return
+                    ADA pc_n BCS mainloop CPI 254 BCS mainloop ; test l0 + l1 < 254
+                      DEW cptr
+                      LDA cptr+0 PHS LDA cptr+1 PHS
+                      JPS cutchar PLS PLS
+                      DEB ycur
+                      LDA pc_n STA xcur
+                      LDA pc_ptr+0 STA cptr+0 LDA pc_ptr+1 STA cptr+1   ; cptr = prev
+                      JPA pc_reuse2
+
+  pc_next3:   CPI 127 BNE pc_next4                    ; DEL
+                CLW markptr
+                LDA xcur STA pc_dptr+0 LDI >line STA pc_dptr+1
+                LDR pc_dptr CPI 10 BNE pc_127else
+                  JPS pushline                        ; case delete an '\n'
+                  LDA cptr+0 PHS LDA cptr+1 PHS JPS getnext
+                  PLS STA pc_ptr+1 PLS STA pc_ptr+0   ; pc_ptr = next
+                  LDI 10 PHS LDA pc_ptr+0 PHS LDA pc_ptr+1 PHS
+                  JPS length PLS PLS PLS STA pc_n     ; length of next line
+                  LDI 10 PHS LDA cptr+0 PHS LDA cptr+1 PHS
+                  JPS length PLS PLS PLS              ; length of this line
+                  ADA pc_n BCS mainloop CPI 254 BCS mainloop
+                    DEW pc_ptr                        ; next - 1
+                    LDA pc_ptr+0 PHS LDA pc_ptr+1 PHS
+                    JPS cutchar PLS PLS
+                    JPA pc_reuse2
+    pc_127else: CPI 0 BEQ mainloop                    ;  do not cut the very last zero in the file
+                  LDA xcur PHS LDI >line PHS
+                  JPS cutchar PLS PLS
+                  LDI 1 STA changed
+                  LDI 2 STA redraw
+                  JPA mainloop
+
+  pc_next4:   CPI 9 BNE pc_default                    ; TAB -> space
+                LDI 32 STA input    ; goto default
+
+  pc_default: LDI 0 PHS PHS                           ; DEFAULT (including ENTER)
+              LDI >line PHS STA pc_sptr+1 STA pc_dptr+1
+              JPS length PLS PLS                      ; pc_sptr = source = lenght of line (index points to terminating zero)
+              PLS CPI 254 BCS mainloop
+                STA pc_sptr+0
+                INC STA pc_dptr+0                     ; pc_dptr = destination = pc_sptr + 1 (one beyond)
+    pc_forlp: LDA pc_sptr+0 CPA xcur BCC pc_endf      ; shift the line content to the right including xcur index
+                LDR pc_sptr STR pc_dptr
+                DEB pc_dptr+0 DEB pc_sptr+0 BCS pc_forlp
+    pc_endf:  LDI 1 STA changed
+              LDA input STR pc_dptr                   ; now put in the new character
+              CPI 10 BNE pc_not10
+                JPS pushline
+                LDA cptr+0 PHS LDA cptr+1 PHS JPS getnext   ; cptr = getnext(cptr)
+                PLS STA cptr+1 PLS STA cptr+0
+                LDA ycur CPI 24 BCS pc_bottom
+                  INB ycur
+                  JPA pc_daswars
+    pc_bottom:  LDA tptr+0 PHS LDA tptr+1 PHS JPS getnext   ; tptr = getnext(tptr)
+                PLS STA tptr+1 PLS STA tptr+0
+                INW yorg
+    pc_daswars: JPS pullline
+                CLB xcur LDI 3
+                JPA pc_dend
+    pc_not10: INB xcur LDI 2
+    pc_dend:  STA redraw
+              CLW markptr
+              JPA mainloop
+
+StateESC:   LDA input
+              CPI '[' BNE mainclear
+                STA state
+                JPA mainloop
+
+StateCSI:   LDI 1 STA redraw                          ; always check after this
+            LDA input
+              CPI 'A' BNE csi_next1   ; up
+                JPS pushline
+                LDA cptr+0 PHS LDA cptr+1 PHS JPS getprev
+                PLS STA pc_ptr+1 PLS STA pc_ptr+0
+                CPA cptr+0 BNE csi_ain
+                  LDA pc_ptr+1 CPA cptr+1 BEQ mainclear   ; leave if
+    csi_ain:        LDA pc_ptr+0 STA cptr+0 LDA pc_ptr+1 STA cptr+1
+                      LDA ycur CPI 0 BEQ csi_aelse
+                        DEB ycur
+                        JPA csi_bweiter
+    csi_aelse:        LDA tptr+0 PHS LDA tptr+1 PHS JPS getprev
+                      PLS STA tptr+1 PLS STA tptr+0
+                      LDI <scrolldn PHS LDI >scrolldn PHS
+                      JPS _Print PLS PLS
+                      DEW yorg
+                      INB redraw    ; 2
+                      JPA csi_bweiter
+
+  csi_next1:  CPI 'B' BNE csi_next2   ; down
+                JPS pushline
+                LDA cptr+0 PHS LDA cptr+1 PHS JPS getnext
+                PLS STA pc_ptr+1 PLS STA pc_ptr+0
+                CPA cptr+0 BNE csi_bin
+                  LDA pc_ptr+1 CPA cptr+1 BEQ mainclear   ; leave if
+    csi_bin:        DEW pc_ptr LDR pc_ptr CPI 10 BNE mainclear
+                      INW pc_ptr
+                      LDA pc_ptr+0 STA cptr+0 LDA pc_ptr+1 STA cptr+1
+                      LDA ycur CPI 24 BCS csi_belse
+                        INB ycur
+                        JPA csi_bweiter
+    csi_belse:        LDA tptr+0 PHS LDA tptr+1 PHS JPS getnext
+                      PLS STA tptr+1 PLS STA tptr+0
+                      LDI <scrollup PHS LDI >scrollup PHS
+                      JPS _Print PLS PLS
+                      INW yorg
+                      INB redraw    ; 2
+    csi_bweiter:      JPS pullline
+                      LDI 10 PHS LDI <line PHS LDI >line PHS JPS length
+                      PLS PLS PLS CPA xcur BCS mainclear
+                        STA xcur
+                        JPA mainclear
+
+  csi_next2:  CPI 'D' BNE csi_next3   ; LEFT
+                LDA xcur CPI 0 BEQ csi_delse
+                  DEB xcur
+                  JPA mainclear
+    csi_delse:  LDA cptr+0 CPI <data BNE csi_din
+                  LDA cptr+1 CPI >data BEQ mainclear
+      csi_din:      JPS pushline
+                    LDA cptr+0 PHS LDA cptr+1 PHS JPS getprev
+                    PLS STA pc_ptr+1 PLS STA pc_ptr+0
+                    CPA cptr+0 BNE csi_din2
+                      LDA pc_ptr+1 CPA cptr+1 BEQ mainclear   ; leave if
+        csi_din2:       LDA pc_ptr+0 STA cptr+0 LDA pc_ptr+1 STA cptr+1
+                        LDA ycur CPI 0 BEQ csi_delse2
+                          DEB ycur
+                          JPA csi_dweiter
+        csi_delse2:     LDA tptr+0 PHS LDA tptr+1 PHS JPS getnext
+                        PLS STA tptr+1 PLS STA tptr+0
+                        LDI <scrolldn PHS LDI >scrolldn PHS
+                        JPS _Print PLS PLS
+                        DEW yorg
+                        INB redraw        ; 2
+        csi_dweiter:    JPS pullline
+                        LDI 10 PHS LDI <line PHS LDI >line PHS JPS length
+                        PLS PLS PLS STA xcur
+                        JPA mainclear
+
+  csi_next3:  CPI 'C' BNE csi_next4                     ; RIGHT
+                LDI 10 PHS LDI <line PHS LDI >line PHS JPS length
+                PLS PLS PLS
+                CPA xcur BCC csi_celse BEQ csi_celse
+                  INB xcur
+                  JPA mainclear
+    csi_celse:  STA pc_ptr+0 LDI >line STA pc_ptr+1
+                LDR pc_ptr CPI 0 BEQ mainclear
+                  JPS pushline
+                  LDA cptr+0 PHS LDA cptr+1 PHS JPS getnext
+                  PLS STA pc_ptr+1 PLS STA pc_ptr+0
+                  CPA cptr+0 BNE csi_cin
+                    LDA pc_ptr+1 CPA cptr+1 BEQ mainclear
+      csi_cin:        DEW pc_ptr LDR pc_ptr CPI 10 BNE mainclear
+                        INW pc_ptr
+                        LDA pc_ptr+0 STA cptr+0 LDA pc_ptr+1 STA cptr+1
+                        LDA ycur CPI 24 BCS csi_celse2
+                          INB ycur
+                          JPA csi_cweiter
+      csi_celse2:       LDA tptr+0 PHS LDA tptr+1 PHS JPS getnext
+                        PLS STA tptr+1 PLS STA tptr+0
+                        LDI <scrollup PHS LDI >scrollup PHS
+                        JPS _Print PLS PLS
+                        INW yorg
+                        INB redraw    ; 2
+      csi_cweiter:      JPS pullline
+        csi_reuse:      CLB xcur
+                        JPA mainclear
+
+  csi_next4:  LDI '~' STA state       ; interpret as numpad key
+              JPA mainloop
+
+StatePad:   LDA input CPI '~' BNE mainclear
+                LDA lastinp
+
+                CPI '1' BNE pp_next1            ; HOME
+                  LDI 1 STA redraw
+                  JPA csi_reuse
+
+  pp_next1:     CPI '4' BNE pp_next2            ; END
+                  LDI 10 PHS LDI <line PHS LDI >line PHS JPS length
+                  PLS PLS PLS STA xcur
+  mainclrdr1:     LDI 1 STA redraw
+                  JPA mainclear
+
+  pp_next2:     CPI '5' BNE pp_next3            ; PAGE UP
+                  LDA cptr+1 CPI >data BNE pp5_noteq
+                    LDA cptr+0 CPI <data BEQ mainclear          ; quick exit when already up
+    pp5_noteq:        JPS pushline
+                      LDI 25 STA pc_n
+
+    pp5_loop:         LDA cptr+0 PHS LDA cptr+1 PHS
+                      JPS getprev               ; 25 getprev
+                      LDS 2 CPA cptr+0 BNE pp5_lpnoteq
+                        LDS 1 CPA cptr+1 BEQ pp5_lpout
+      pp5_lpnoteq:        DEW yorg
+      pp5_lpout:      PLS STA cptr+1 PLS STA cptr+0
+                      DEB pc_n BNE pp5_loop
+                        LDA cptr+1 STA tptr+1 LDA cptr+0 STA tptr+0   ; tptr = cptr
+                        LDA ycur STA pc_n           ; pc_n = oldycur
+                        ADW yorg
+                        CLB ycur
+    pp5_loop2:          DEB pc_n BCC pp5_ende
+                          LDA tptr+0 PHS LDA tptr+1 PHS JPS getprev
+                          PLS STA pc_ptr+1 PLS STA pc_ptr+0
+                            CPA tptr+0 BNE pp5_noteq2
+                              LDA pc_ptr+1 CPA tptr+1 BEQ pp5_ende
+    pp5_noteq2:                 LDA pc_ptr+1 STA tptr+1 LDA pc_ptr+0 STA tptr+0
+                                INB ycur
+                                JPA pp5_loop2
+          pp5_ende:     LDA ycur SBW yorg
+          pp5_pagedn:   JPS pullline
+                        LDI 10 PHS LDI <line PHS LDI >line PHS JPS length
+                        PLS PLS PLS CPA xcur BCC pp5_useit
+                          LDA xcur
+          pp5_useit:    STA xcur
+          rd3mclear:    LDI 3 STA redraw
+                        JPA mainclear
+
+  pp_next3:     CPI '6' BNE mainclear           ; PAGE DOWN
+                  LDA cptr+0 PHS LDA cptr+1 PHS JPS getnext
+                  PLS STA pc_ptr+1 PLS STA pc_ptr+0
+                  LDR pc_ptr CPI 0 BEQ mainclear          ; quick exis, when already down
+                    JPS pushline
+                    CLB pc_n                              ; pc_n = downsteps
+                    LDI 49 SBA ycur STA pc_m              ; pc_m = for loop variable
+    pp3_for1:       DEB pc_m BCC pp3_for1end              ; FOR 1:
+                      LDA cptr+0 PHS LDA cptr+1 PHS JPS getnext
+                      PLS STA pc_ptr+1 PLS STA pc_ptr+0
+                      LDR pc_ptr CPI 0 BEQ pp3_for1end
+                        LDA pc_ptr+0 STA cptr+0 LDA pc_ptr+1 STA cptr+1
+                        LDA pc_m CPI 25 BCS pp3_for1
+                          INB pc_n
+                          LDA tptr+0 PHS LDA tptr+1 PHS JPS getnext
+                          PLS STA tptr+1 PLS STA tptr+0
+                          JPA pp3_for1
+    pp3_for1end:    LDA tptr+0 STA cptr+0 LDA tptr+1 STA cptr+1
+                    LDA pc_n ADW yorg
+                    LDI 25 ADA ycur SBA pc_n STA pc_m     ; pc_m = for loop variable
+                    CLB ycur
+    pp3_for2:       DEB pc_m BCC pp5_pagedn               ; FOR 2: use the exit code from "page up"
+                      LDA cptr+0 PHS LDA cptr+1 PHS JPS getnext
+                      PLS STA pc_ptr+1 PLS STA pc_ptr+0
+                      LDR pc_ptr CPI 0 BEQ pp5_pagedn     ; use the exit code from "page up"
+                        LDA pc_ptr+0 STA cptr+0 LDA pc_ptr+1 STA cptr+1
+                        INB ycur
+                        JPA pp3_for2
+
+StateNew:   LDA input
+              CPI 'y' BNE rd3mclear
+                CLB data JPA warmstart
+
+StateLoad:  LDA input
+              CPI 10 BNE pl_next1
+                LDA _ParsePtr+0 CPA namestart+0 BEQ rd3mclear
+                  LDA namestart+0 PHS LDA namestart+1 PHS
+                  JPS _LoadFile
+                  PLS PLS CPI 0x80 BCC rd3mclear
+                    JPA mainload
+
+  pl_next1:   CPI 8 BNE pl_next2
+                LDA _ParsePtr+0 CPA namestart+0 BEQ rd3mclear
+                  LDI <backsp PHS LDI >backsp PHS
+                  JPS _Print PLS PLS
+                  DEW _ParsePtr LDI 0 STR _ParsePtr
+                  JPA mainloop
+
+  pl_next2:   CPI 27 BEQ rd3mclear
+
+              CPI 0x11 BEQ rd3mclear
+
+  pl_default: CPI 32 BCC mainloop
+              LDA _ParsePtr+0 SBA namestart+0
+              CPI 19 BCS mainloop
+                LDA input STR _ParsePtr
+                OUT JPS _WaitUART
+                INW _ParsePtr LDI 0 STR _ParsePtr
+                JPA mainloop
+
+StateSave:  LDA input
+              CPI 10 BNE pl_next1
+                LDA _ParsePtr+0 CPA namestart+0 BEQ rd3mclear
+                  CLB pc_ptr+0 LDI >data STA pc_ptr+1
+  ps_findzero:    LDR pc_ptr CPI 0 BEQ ps_saveit
+                    INW pc_ptr JPA ps_findzero
+  ps_saveit:      LDA namestart+0 PHS LDA namestart+1 PHS
+                  LDI <data PHS LDI >data PHS
+                  LDA pc_ptr+0 PHS LDA pc_ptr+1 PHS
+                  JPS _SaveFile
+                  PLS PLS PLS PLS PLS PLS
+                  JPA rd3mclear
+
+; Copies a marked area to 0xe000-0xefff, checks if it fits in!
+; uses: markptr, cptr, changes: pc_ptr
+; success: copysize != 0
+CopyMarked:   CLW copysize                           ; devalidate buffer
+              LDA cptr+0 STA pc_ptr+0                ; current cursor row
+              LDA cptr+1 STA pc_ptr+1
+              LDA xcur ADW pc_ptr                    ; pc_ptr = one step beyond data
+              LDA markptr+1 SBB pc_ptr+1             ; subtract markptr to get the required bytesize
+              LDA markptr+0 SBW pc_ptr
+              LDA pc_ptr+1 CPI 0x10 BCS cm_return    ; max possible size is 0xfff bytes
+                LDI <copy PHS LDI >copy PHS          ; push dest
+                LDA markptr+0 PHS LDA markptr+1 PHS  ; push source
+                LDA pc_ptr+0 PHS LDA pc_ptr+1 PHS    ; push the number of used bytes
+                JPS _MemMove LDI 6 ADW 0xffff        ; clean up the stack
+                LDA pc_ptr+1 STA copysize+1          ; store byte size
+                LDA pc_ptr+0 STA copysize+0
+  cm_return:  RTS
+
+; calculate the length of a string (excluding the terminator)
+; push: terminator (active lower or equal), string address LSB, MSB
+; pull: #, len_MSB, len_LSB
+length:         LDS 4 STA pu_len+0
+                LDS 3 STA pu_len+1
+  lenloop:      LDS 5 CPR pu_len BCS lenende  ; load terminator
+                  INW pu_len JPA lenloop
+  lenende:      LDS 3 SBB pu_len+1
+                LDS 4 SBW pu_len
+                LDA pu_len+1 STS 4
+                LDA pu_len+0 STS 5
+                RTS
+
+; returns next line address after \n or returns address of EOF
+; push: address LSB, MSB
+; pull: address MSB, LSB
+getnext:        LDS 4 STA pu_sptr+0
+                LDS 3 STA pu_sptr+1
+  gn_loop:      LDR pu_sptr
+                CPI 0 BEQ gn_return
+                CPI 10 BEQ gn_addret
+                  INW pu_sptr
+                  JPA gn_loop
+  gn_addret:    INW pu_sptr
+  gn_return:    LDA pu_sptr+1 STS 3
+                LDA pu_sptr+0 STS 4
+                RTS
+
+; returns previous line's address or returns the same address
+; push: address LSB, MSB
+; pull: address MSB, LSB
+getprev:        LDS 4 STA pu_sptr+0
+                LDS 3 STA pu_sptr+1
+                LDI >data CPA pu_sptr+1 BNE gp_loop1
+                LDI <data CPA pu_sptr+0 BEQ gp_return
+  gp_loop1:       DEW pu_sptr
+  gp_loop2:       LDI >data CPA pu_sptr+1 BNE gp_loopon
+                  LDI <data CPA pu_sptr+0 BEQ gp_return
+  gp_loopon:        DEW pu_sptr
+                    LDR pu_sptr CPI 10 BNE gp_loop2
+                      INW pu_sptr
+  gp_return:    LDA pu_sptr+1 STS 3
+                LDA pu_sptr+0 STS 4
+                RTS
+
+; pulls current line incuding \n into 'line buffer' and terminates with zero
+pullline:       LDA cptr+0 PHS LDA cptr+1 PHS
+                JPS getnext
+                PLS PLS SBA cptr+0 STA pu_n
+                  CLB pu_dptr+0 LDI >line STA pu_dptr+1
+                  LDA cptr+0 STA pu_sptr+0 LDA cptr+1 STA pu_sptr+1
+  pl_loop:      DEB pu_n BCC pl_return
+                  LDR pu_sptr STR pu_dptr
+                  INW pu_sptr INW pu_dptr
+                  JPA pl_loop
+  pl_return:    LDI 0 STR pu_dptr
+                CLB changed
+                RTS
+
+; push 'line buffer' into current line postion, replacing the old line
+pushline:       LDA changed CPI 0 BEQ pl_nochange
+                  CLB changed
+                  LDA cptr+0 STA pu_dptr+0 PHS
+                  LDA cptr+1 STA pu_dptr+1 PHS
+                  JPS getnext
+                  PLS STA pu_sptr+1 PLS STA pu_sptr+0           ; get next pointer
+                  LDI 0 PHS PHS LDI >line PHS
+                  JPS length PLS PLS PLS STA pu_n               ; get newsize of "line"
+                  ADW pu_dptr                                   ; pu_dptr = cptr + newsize
+                  LDI 0 PHS LDA pu_sptr+0 PHS LDA pu_sptr+1 PHS
+                  JPS length PLS
+                  PLS STA pu_len+1 PLS STA pu_len+0 INW pu_len  ; pu_len = rest (incl. zero)
+                  LDA pu_dptr+0 PHS LDA pu_dptr+1 PHS           ; push dest
+                  LDA pu_sptr+0 PHS LDA pu_sptr+1 PHS           ; push source
+                  LDA pu_len+0 PHS LDA pu_len+1 PHS             ; push size
+                  JPS _MemMove LDI 6 ADW 0xffff
+                  LDA cptr+0 PHS LDA cptr+1 PHS                 ; push dest
+                  LDI <line PHS LDI >line PHS                   ; push source
+                  LDA pu_n PHS LDI 0 PHS                        ; push size
+                  JPS _MemMove LDI 6 ADW 0xffff
+  pl_nochange:  RTS
+
+; cuts out a character from a zero-terminated string, thus shortening the string
+; push: str_lsb, str_msb
+; pull: #, #
+cutchar:        LDS 3 STA pu_dptr+1 STA pu_sptr+1                ; retrieve address of the char to cut
+                LDS 4 STA pu_dptr+0 STA pu_sptr+0
+                INW pu_sptr
+  cut_loop:     LDR pu_sptr STR pu_dptr CPI 0 BEQ cut_done
+                  INW pu_sptr INW pu_dptr JPA cut_loop
+  cut_done:     RTS
+
+; print number 000| - 999|
+; push: number_lsb, number_msb
+; pull: #, #
+; pu_len (2 bytes), pu_n (1 byte)
+Print999:       LDS 3 STA pu_len+1             		; PRINT A POSITIVE NUMBER 000| - 999|
+                LDS 4 STA pu_len+0
+                LDI '0' STA pu_n
+  p100loop:     LDI 100 SBW pu_len BCC p99end100
+                  INB pu_n JPA p100loop
+  p99end100:    LDI 100 ADW pu_len
+                LDA pu_n OUT JPS _WaitUART
+                LDI '0' STA pu_n
+  p10loop:      LDI 10 SBB pu_len+0 BCC p99end10
+                  INB pu_n JPA p10loop
+  p99end10:     LDA pu_n OUT JPS _WaitUART
+                LDI 58 ADB pu_len+0
+                LDA pu_len+0 OUT JPS _WaitUART
+                LDI '|' OUT JPS _WaitUART
+                RTS
+
+ud_homestr:     27, '[H', 27, '[J', 0
+ud_clrstr:      27, '[G', 27, '[K', 0
+newstr:         27, '[H', 27, '[Ky/n? ', 0
+loadstr:        27, '[H', 27, '[KLOAD ', 0
+savestr:        27, '[H', 27, '[KSAVE ', 0
+backsp:         27, '[D ', 27, '[D', 0
+scrolldn:       27, '[T', 0
+scrollup:       27, '[S', 0
+iscold:         1             ; indicating first start of the editor
+
+#end
+
+namestart:      0xffff        ; start of the filename string inside _InpBuf (end marked by _ParsePtr)
+copysize:       0xffff        ; size of valid copied data
+markptr:        0xffff        ; pointer to linestart of a marked area, invalid: MSB = 0x00
+marktptr:       0xffff        ; remembers the top ptr while marking
+markyorg:       0xffff        ; remember the yorg that fits to the top
+markx:          0xff          ; remembers xcur while marking
+marky:          0xff          ; remembers ycur while marking
+tptr:           0xffff        ; top pointer
+cptr:           0xffff        ; current line pointer
+state:          0xff          ; input state machine
+xcur:           0xff          ; must be followed by ycur
+ycur:           0xff          ; y position of the cursor (starting from 0)
+xorg:           0xff          ; x position of the cursor (starting from 0)
+yorg:           0xffff        ; global line number of the first columns of the screen (starting from 1)
+cols:           0xff          ; display this number of columns (toggle line numbers)
+redraw:         0xff          ; 3: all, 2: line, 1: test, 0: nix
+changed:        0xff          ; 1: line was changed, 0: line is unchnaged (no need to pushline)
+input:          0xff          ; holds current input char...
+lastinp:        0xff          ; ... and the previous input char
+
+pc_sptr:        0xffff        ; shared by functions that only use these basic procedures:
+pc_dptr:        0xffff        ; pushline / pullline / getprev / getnext / length
+pc_ptr:         0xffff
+pc_n:           0xff
+pc_m:           0xff
+pc_k:           0xff
+
+pu_sptr:        0xffff        ; used inside these often used funtions:
+pu_dptr:        0xffff        ; pushline / pullline / getprev / getnext / length
+pu_len:         0xffff
+pu_n:           0xff
+
+#end
+
+#org 0x8f00     line:         ; alligned 256 bytes line buffer
+#org 0x9000     data:         ; beginning of the data area
+#org 0xe000     copy:         ; beginning of the copybuffer area
+
+#org 0xf000     _Start:       ; OS entry point showing start screen
+#org 0xf003     _Prompt:      ; OS entry point for line input prompt
+#org 0xf006     _Print:       ; Prints a null-terminated string
+#org 0xf009     _PrintHex:    ; Prints a byte in HEX format
+#org 0xf00c     _WaitUART:    ; Waits for UART transmission
+#org 0xf00f     _LoadFile:    ; Loads a file from the SSD
+#org 0xf012     _SaveFile:    ; Saves data as a file to SSD bank
+#org 0xf015     _MemMove:     ; Moves N bytes from A.. to C..
+#org 0xf022     _CursorX:     ; set the cursor x position 1..60
+#org 0xf025     _CursorY:     ; set the cursor y position 1..25
+#org 0xfeb2     _ParsePtr:    ; pointer to next char of command line
+#org 0xfec9     _InpBuf:      ; 55 bytes line input string (also used by FLASH erase monitor)
+
+; -------------------------------------------------------------------------------
+; Copyright (c) 2021 Carsten Herting (slu4)
+; -------------------------------------------------------------------------------
+; MIT LICENSE
+; Permission is hereby granted, free of charge, to any person obtaining a copy of
+; this software and associated  documentation files  (the "Software"), to deal in
+; the Software without  restriction, including  without  limitation the rights to
+; use, copy,  modify, merge, publish, distribute, sublicense,  and/or sell copies
+; of the Software, and  to permit persons to whom the Software is furnished to do
+; so, subject to the following conditions:
+; The above copyright notice and  this permission notice shall be included in all
+; copies or substantial portions of the Software.
+; THE  SOFTWARE  IS PROVIDED "AS IS",  WITHOUT  WARRANTY OF  ANY KIND, EXPRESS OR
+; IMPLIED,  INCLUDING  BUT  NOT  LIMITED  TO  THE  WARRANTIES OF MERCHANTABILITY,
+; FITNESS FOR  A PARTICULAR  PURPOSE AND  NONINFRINGEMENT. IN NO  EVENT SHALL THE
+; AUTHORS  OR  COPYRIGHT  HOLDERS  BE  LIABLE FOR  ANY  CLAIM, DAMAGES  OR  OTHER
+; LIABILITY,  WHETHER IN AN ACTION  OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+; OUT OF OR IN  CONNECTION WITH  THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+; SOFTWARE.
+; -------------------------------------------------------------------------------
