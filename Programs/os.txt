@@ -2,7 +2,7 @@
 ; *****                                                                      *****
 ; ***** MinOS 1.5.1 for the 8-Bit Minimal Computer System Revision 1.3 - 1.5 *****
 ; *****                                                                      *****
-; *****        written by Carsten Herting - last update JUly 26th 2021       *****
+; *****        written by Carsten Herting - last update July 26th 2021       *****
 ; *****                                                                      *****
 ; ********************************************************************************
 ; Usage for in-situ programming: Open command shell, type 'asm os.txt', upload
@@ -776,10 +776,9 @@ SSD_SaveFile:     LDI 19 STA OS_Count                                   ; copy u
 ; Writes data to FLASH (but protects RAM), PtrA: source, PtrB: bytesize, PtrC: dest
 ; push: dest_lsb, dest_msb, bytesize_lsb, bytesize_msb, source_lsb, source_msb
 ; pull: -, -, -, result, nextdest_msb, nextdest_lsb
-; success: result = 0xff
-; modifies: PtrB (0xffff: success, else failure)
-;           PtrA (points to byte after source data if successful)
-;           PtrC (points to byte after target data if successful)
+; modifies: OS_PtrB (0xffff: success, else failure)
+;           OS_PtrA (points to byte after source data if successful)
+;           OS_PtrC (points to byte after target data if successful)
 ; *********************************************************************************
 FLASH_Write:      DEW OS_PtrB BCC fw_return                     ; Anzahl runterzählen (success rückmelden)
                     LDA OS_PtrC+1 CPI 0x80 BCS fw_return        ; teste, ob dest addr < 0x8000 ist (FLASH)
@@ -788,7 +787,7 @@ FLASH_Write:      DEW OS_PtrB BCC fw_return                     ; Anzahl runterz
                         LDI 0xaa STA 0x5555                     ; INIT FLASH WRITE PROGRAM
                         LDI 0x55 STA 0x2aaa
                         LDI 0xa0 STA 0x5555
-                        LDR OS_PtrA STR OS_PtrC                  ; START WRITE PROCESS
+                        LDR OS_PtrA STR OS_PtrC                 ; START WRITE PROCESS
   fw_writecheck:          DEB OS_Count BCC fw_return            ; write took too long => ERROR!
                           LDR OS_PtrA CPR OS_PtrC               ; re-read FLASH location
                           BNE fw_writecheck                     ; data okay?
@@ -864,10 +863,10 @@ SSD_FindFile:     ; browse through all stored files and see if <filename> matche
   menutxt:      10
                 'HEX [r] Set A [run]', 10
                 '[A].B   Show [A]..B [q]', 10
-                ':C[ D]  Store C[D] at A..', 10
+                ':C[ D]  Store C [D] at A..', 10
                 'v A B C Fill A..B with C', 10
                 'k A B C Copy A..B to C..', 10
-                'i A     DisAsm A.. [q]', 10
+                'i A     Disasm A.. [q]', 10
                 's A B F Save A..B as file F', 10
                 'l file  Load file', 10
                 'z file  Zap file', 10
@@ -882,6 +881,7 @@ SSD_FindFile:     ; browse through all stored files and see if <filename> matche
 
 OS_END:                                         ; address of first unused byte after OS code
                 #end                            ; VARIABLES USED BY THE OS
+
 #org 0xe000     OS_SSDRAMBuf:                   ; 4KB buffer for 'data to keep' when moving files and erasing SSD blocks
 #org 0xfeb0     OS_MemAddr:                     ; current memory address (16 bytes von MINOS am unteren Ende des Stack)
 #org 0xfeb2     OS_ParsePtr:                    ; Zeiger auf das letzte eingelesene Zeichen (to be reset at startup)
