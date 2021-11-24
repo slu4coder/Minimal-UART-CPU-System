@@ -2,16 +2,16 @@
 
 NEWS: 'Minimal CPU System' Emulator released! See user manual chapter 'Minimal Emulator' for details on how to use it.
 
-NEWS: Native assembler and text editor released!
+● Native assembler and text editor released!
 
-NEWS: User Manual and Reference: https://docs.google.com/document/d/1c2ZHtLd1BBAwcBAjBZZJmCA3AXpbpv80dlAtsMYpuF4/edit?usp=sharing
+● User Manual and Reference: https://docs.google.com/document/d/1c2ZHtLd1BBAwcBAjBZZJmCA3AXpbpv80dlAtsMYpuF4/edit?usp=sharing
 
-NEWS: There is a new revision 1.5 out now featuring 512KB FLASH SSD, 3.6864MHz clock speed and an expansion port!
+● Revision 1.5 is out now featuring 512KB FLASH SSD, 3.6864MHz clock speed and an expansion port!
 https://www.youtube.com/watch?v=osVi06VKvA0
 
-NEWS: Minimal Python Assembler released: https://www.youtube.com/watch?v=rdKX9hzA2lU
+● Minimal Python Assembler released: https://www.youtube.com/watch?v=rdKX9hzA2lU
 
-NEWS: The Minimal CPU System now has a dedicated hardware serial 'Minimal Terminal': https://github.com/slu4coder/Minimal-Terminal
+● The Minimal CPU System now has a dedicated hardware serial 'Minimal Terminal': https://github.com/slu4coder/Minimal-Terminal
 but can also be operated via a USB-to-serial breakout board and a terminal emulation (e. g. Tera Term) of cause.
 
 I've built my own Computer from scratch - using nothing but TTL chips, because, well, why not? I wanted a CPU that is easy to understand, fun to build and powerful enough to allow for programming educational stuff and little games on it. Ah, and by the way - it should be as simple as possible - sort of the "Simplest Usable Personal Computer". This repo provides you with everything you need to follow my one-and-a-half-year journey down this rabbit hole. Besides running some video game classics, this little DIY CPU is capable of parsing arbitrary mathmatical expressions and performing floating point calculations in single (32-bit) precision. And it comes with an SSD file system, too, since it uses it's own FLASH IC as permanent SSD storage.
@@ -54,7 +54,7 @@ TECHNICAL SPECIFICATION:
   ● Built from 74HCxx TTL logic on 120mm x 190mm PCB
   
 
-I hope you find this information useful, educational or otherwise interesting. I'd love to hear about you build, so meet me on YouTube.
+I hope you find this information useful, educational or otherwise interesting. I'd love to hear about your build, so meet me on YouTube.
 
 https://www.youtube.com/channel/UCXYQcMpUBT3aaQKfmAVJNow
 
