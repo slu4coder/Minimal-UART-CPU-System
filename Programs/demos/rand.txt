@@ -1,7 +1,7 @@
-#org 0x8000
+#org 0xc000
 
             LDI 0xfe STA 0xffff
-            LDI <scrtxt PHS LDI >scrtxt PHS JPS _Print PLS PLS
+            LDI <text PHS LDI >text PHS JPS _Print PLS PLS
 
 maze:       PHS JPS _Random
             PLS LSR LSR INC
@@ -14,7 +14,7 @@ maze:       PHS JPS _Random
             LDI '*' OUT JPS _WaitUART
             JPA maze
 
-scrtxt:     27, '[H', 27, '[J', 0
+text:     27, '[H', 27, '[J', 0
 
 #end
 
@@ -26,4 +26,4 @@ scrtxt:     27, '[H', 27, '[J', 0
 
 #begin
 
-#org 0x8000
+#org 0xc000
