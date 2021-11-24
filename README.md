@@ -1,6 +1,6 @@
 # Minimal UART CPU System - Revision 1.5 Out Now!
 
-NEWS: 'Minimal CPU System' Emulator released!
+NEWS: 'Minimal CPU System' Emulator released! See user manual chapter 'Minimal Emulator' for details on how to use it.
 
 NEWS: Native assembler and text editor released!
 
