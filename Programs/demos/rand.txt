@@ -1,7 +1,7 @@
 #org 0xc000
 
             LDI 0xfe STA 0xffff
-            LDI <text PHS LDI >text PHS JPS _Print PLS PLS
+            LDI <scrtxt PHS LDI >scrtxt PHS JPS _Print PLS PLS
 
 maze:       PHS JPS _Random
             PLS LSR LSR INC
@@ -11,19 +11,14 @@ maze:       PHS JPS _Random
             PLS LSR LSR LSR INC
             CPI 26 BCS maze
             PHS JPS _CursorY PLS
-            LDI '*' OUT JPS _WaitUART
+            LDI '*' OUT
             JPA maze
 
-text:     27, '[H', 27, '[J', 0
+scrtxt:     27, '[H', 27, '[J', 0
 
-#end
-
-#org 0xf00c    _WaitUART:              ; Waits for UART transmission
 #org 0xf006    _Print:                 ; Prints a null-terminated string
 #org 0xf022    _CursorX:               ; set the cursor x position 1..60
 #org 0xf025    _CursorY:               ; set the cursor y position 1..25
 #org 0xf028    _Random:                ; Pseudo-random generator
-
-#begin
 
 #org 0xc000
