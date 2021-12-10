@@ -1,0 +1,20 @@
+; reading the digital input pins of the GPIO Expansion Card with the Minimal CPU System
+
+#org 0x8000
+
+					LDI 0xfe STA 0xffff
+
+loop:     LDA 0xdff0
+					LSL LSL LSL LSL
+					LSR LSR LSR LSR
+					PHS JPS _PrintHex PLS
+					LDI ' ' OUT
+					JPS _WaitUART
+					JPA loop
+
+#end
+#org 0xf009    _PrintHex:        ; Prints a byte in HEX format
+#org 0xf00c    _WaitUART:        ; Waits for UART transmission
+
+#begin
+#org 0x8000
