@@ -1,6 +1,6 @@
 # Minimal UART CPU System - Revision 1.5 Out Now!
 
-NEWS: 'Minimal VGA Extension Card' released! See https://github.com/slu4coder/DIY-VideoRAM
+NEWS: 'Minimal VGA Extension Card' released! https://github.com/slu4coder/DIY-VideoRAM/tree/main/KiCAD
 
 NEWS: 'Minimal CPU System' Emulator released! See user manual chapter 'Minimal Emulator' for details.
 
