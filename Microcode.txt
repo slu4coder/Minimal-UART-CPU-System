@@ -1,4 +1,4 @@
-// MINIMAL CPU SYSTEM - MICROCODE VERSION 1.5 written by Carsten Herting 17.04.2021
+// MINIMAL CPU SYSTEM - MICROCODE VERSION 1.5 written by Carsten Herting Jan 25th 2022
 // Use for board revisions 1.3 and higher.
 
 #define NOP     CO|MI, CO|MI|HI, RO|HI|CEME, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
@@ -59,8 +59,8 @@
 #define DEB     CO|MI, CO|MI|HI, RO|HI|CEME, RO|BI|CEME, RO|MI|HI, BO|MI, RO|AI|BI, EOFI|ES|EC|BI, EOFI|ES|RI, EOFI|ES|AI|CEME, IC, 0, 0, 0, 0, 0
 #define ADB     CO|MI, CO|MI|HI, RO|HI|CEME, RO|BI|CEME, RO|MI|HI, BO|MI, RO|BI, EOFI|RI, CEME, IC, 0, 0, 0, 0, 0, 0
 #define SBB     CO|MI, CO|MI|HI, RO|HI|CEME, RO|BI|CEME, RO|MI|HI, BO|MI, AO|BI, RO|AI, EOFI|ES|EC|RI, BO|AI|CEME, IC, 0, 0, 0, 0, 0
-#define ACB0    CO|MI, CO|MI|HI, RO|HI|CEME, RO|BI|CEME, RO|MI|HI, BO|MI, RO|BI, EOFI|AI,    AO|RI, CEME, IC, 0, 0, 0, 0, 0
-#define ACB1    CO|MI, CO|MI|HI, RO|HI|CEME, RO|BI|CEME, RO|MI|HI, BO|MI, RO|BI, EOFI|EC|AI, AO|RI, CEME, IC, 0, 0, 0, 0, 0
+#define ACB0		CO|MI, CO|MI|HI, RO|HI|CEME, RO|BI|CEME, RO|MI|HI, BO|MI, AO|BI, RO|AI, EOFI|AI, 	     AO|RI, BO|AI|CEME, IC, 0, 0, 0, 0
+#define ACB1		CO|MI, CO|MI|HI, RO|HI|CEME, RO|BI|CEME, RO|MI|HI, BO|MI, AO|BI, RO|AI, EOFI|EC|AI,    AO|RI, BO|AI|CEME, IC, 0, 0, 0, 0
 #define SCB0    CO|MI, CO|MI|HI, RO|HI|CEME, RO|BI|CEME, RO|MI|HI, BO|MI, AO|BI, RO|AI, EOFI|ES|AI,    AO|RI, BO|AI|CEME, IC, 0, 0, 0, 0
 #define SCB1    CO|MI, CO|MI|HI, RO|HI|CEME, RO|BI|CEME, RO|MI|HI, BO|MI, AO|BI, RO|AI, EOFI|ES|EC|AI, AO|RI, BO|AI|CEME, IC, 0, 0, 0, 0
 
@@ -106,7 +106,7 @@ uint16_t mEEPROM[8192]    // microcode depending on flags, opcode and stepcounte
 /*
 ------------------------------------------------------------------------------
 MIT License
-Copyright (c) 2021 Carsten Herting
+Copyright (c) 2022 Carsten Herting
 ------------------------------------------------------------------------------
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
