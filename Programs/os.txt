@@ -1,8 +1,8 @@
 ; ********************************************************************************
 ; *****                                                                      *****
-; ***** MinOS 1.5.1 for the 8-Bit Minimal Computer System Revision 1.3 - 1.5 *****
+; ***** MinOS 1.5.2 for the 8-Bit Minimal Computer System Revision 1.3 - 1.5 *****
 ; *****                                                                      *****
-; *****        written by Carsten Herting - last update July 26th 2021       *****
+; *****        written by Carsten Herting - last update Jan 25th 2022        *****
 ; *****                                                                      *****
 ; ********************************************************************************
 ; Usage for in-situ programming: Open command shell, type 'asm os.txt', upload
@@ -179,6 +179,7 @@
                   DEB OS_Count
                   CPI 8 BNE notmiddle
                     JPS OS_PrintSpace               ; print an extra space after 8 bytes
+                    JPA nextlist                    ; bug-fix by paulscottrobson - thank you!
   notmiddle:      CPI 0 BNE nextlist
                     JPS OS_PrintEnter
                     DEB OS_PtrC                     ; reuse as line counter
@@ -235,7 +236,6 @@ OS_XOR:         LDI 8 STA OS_PtrC+2      ; init bit counter
 ; Helpful subroutines
 ; *******************
 OS_PrintSpace:      LDI ' ' JPA printchar
-
   OS_PrintError:    LDI '?' OUT JPS _WaitUART
   OS_PrintEnter:    LDI 10
     printchar:      OUT JPS _WaitUART
@@ -857,7 +857,7 @@ SSD_FindFile:     ; browse through all stored files and see if <filename> matche
                 'JPS', 'RTS', 'BNE', 'BEQ', 'BCC', 'BCS', 'BPL', 'BMI'
 
   hometxt:       27, '[H', 27, '[H', 27, '[J', 0
-  starttxt:     '| MINIMAL CPU SYSTEM 1.5.1 by C. Herting |', 10
+  starttxt:     '| MINIMAL CPU SYSTEM 1.5.2 by C. Herting |', 10
                 '| 512KB SSD - 32KB RAM - Type m for menu |', 10, 0
 
   menutxt:      10
@@ -900,7 +900,7 @@ OS_END:                                         ; address of first unused byte a
 #org 0xfec9     OS_InpBuf:                      ; 55 bytes line input string (also used by FLASH erase monitor)
 
 ; -------------------------------------------------------------------------------
-; Copyright (c) 2021 Carsten Herting (slu4)
+; Copyright (c) 2022 Carsten Herting (slu4)
 ; -------------------------------------------------------------------------------
 ; MIT LICENSE
 ; Permission is hereby granted, free of charge, to any person obtaining a copy of
