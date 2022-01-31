@@ -10,14 +10,32 @@ opCodes = { 'NOP':'0',  'BNK':'1',  'OUT':'2',  'CLC':'3',  'SEC':'4',  'LSL':'5
 lines, lineinfo, lineadr, labels = [], [], [], {}
 LINEINFO_NONE, LINEINFO_ORG, LINEINFO_BEGIN, LINEINFO_END	= 0x00000, 0x10000, 0x20000, 0x40000
 
-import sys                                          # read in <sourcefile> 2nd command parameter line by line
-if len(sys.argv) != 2: print('usage: asm.py <sourcefile>'); sys.exit(1)
-f = open(sys.argv[1], 'r')
-while True:                                         # read in the source line
+# def readSource(filename):                           # read in the sourcefiles recursively (with #include functionality)
+#     global lines
+#     try: f = open(filename, 'r')
+#     except: print("ERROR: Can't find file \'"+filename+"\'."); exit(1)
+#     while True:
+#         line = f.readline()
+#         if not line: break
+#         k = line.find('#include')
+#         if k != -1:                                 # interpret anything after #include as a filename
+#             line = line[k+8:].strip().replace('\"', '').replace('\'', '')
+#             readSource(line)                        # read include files recursively
+#         else: lines.append(line.strip())
+#     f.close()
+
+import sys                                          
+if len(sys.argv) < 2: print('USAGE: asm.py <sourcefile> [-s[<tag>]]'); exit(1)
+
+try: f = open(sys.argv[1], 'r')                     # read in the source line WITHOUT #include function
+except: print("ERROR: Can't find file \'" + sys.argv[1] + "\'."); exit(1)
+while True:
     line = f.readline()
     if not line: break
     lines.append(line.strip())                      # store each line without leading/trailing whitespaces
 f.close()
+
+# readSource(sys.argv[1])                           # ALTERNATIVE: read in sourcefile(s) with #include recursively
 
 for i in range(len(lines)):                         # PASS 1: do PER LINE replacements
     while(lines[i].find('\'') != -1):               # replace '...' occurances with corresponding ASCII code(s)
@@ -33,13 +51,18 @@ for i in range(len(lines)):                         # PASS 1: do PER LINE replac
     lines[i] = lines[i].replace(',', ' ')                                       # replace commas with spaces
 
     lineinfo.append(LINEINFO_NONE)                  # generate a separate lineinfo
-    if lines[i].find('#begin') != -1: lineinfo[i] |= LINEINFO_BEGIN; lines[i] = lines[i].replace('#begin', '')
-    if lines[i].find('#end') != -1: lineinfo[i] |= LINEINFO_END; lines[i] = lines[i].replace('#end', '')
+    if lines[i].find('#begin') != -1:
+        lineinfo[i] |= LINEINFO_BEGIN
+        lines[i] = lines[i].replace('#begin', '')
+    if lines[i].find('#end') != -1:
+        lineinfo[i] |= LINEINFO_END
+        lines[i] = lines[i].replace('#end', '')
     k = lines[i].find('#org')
     if (k != -1):        
-        s = lines[i][k:].split()                    # split from #org onwards
+        s = lines[i][k:].split(); rest = ""         # split from #org onwards
         lineinfo[i] |= LINEINFO_ORG + int(s[1], 0)  # use element after #org as origin address
-        lines[i] = lines[i][0:k].join(s[2:])        # join everything before and after the #org ... statement
+        for el in s[2:]: rest += " " + el
+        lines[i] = (lines[i][0:k] + rest).strip()   # join everything before and after the #org ... statement
 
     if lines[i].find(':') != -1:
         labels[lines[i][:lines[i].find(':')]] = i   # put label with it's line number into dictionary
@@ -86,12 +109,12 @@ for i in range(len(lines)):                         # PASS 3: replace 'reference
         try: int(lines[i][j], 0)                    # check if ALL elements are numeric
         except: print('ERROR in line ' + str(i+1) + ': Undefined expression \'' + lines[i][j] + '\''); exit(1)
 
-# for i in range(len(lines)):							# print out the result
+# for i in range(len(lines)):						# print out the result line by line
 #    s = ('%04.4x' % lineadr[i]) + ": "
 #    for e in lines[i]: s += ('%02.2x' % (int(e, 0) & 0xff)) + ' '
 #    print(s)
 
-insert = ''; showout = True                       # print out the result
+insert = ''; showout = True                         # print out 16 data bytes per row in Minimal's 'cut & paste' format
 for i in range(len(lines)):
     if lineinfo[i] & LINEINFO_BEGIN: showout = True
     if lineinfo[i] & LINEINFO_END: showout = False
@@ -104,9 +127,17 @@ for i in range(len(lines)):
             if len(insert) >= 16*3 - 1: print(':' + insert); insert = ''
 if insert: print(':' + insert)
 
+if len(sys.argv) > 2:                               # print out all (matching) label definitions and their addresses
+    k = sys.argv[2].find('-s') 
+    if k != -1:
+        sym = sys.argv[2][k+2:]
+        for key, value in labels.items():
+            if key.find(sym) != -1:
+                print('#org '+ '%04.4x' % (value & 0xffff) + '\t' + key + ':')
+
 # -------------------------------------------------------------------------------
 # Minimal Assembler for the 'MINIMAL CPU System' Revision 1.3 and higher
-# Copyright (c) 2021 Carsten Herting (slu4)
+# Copyright (c) 2021, 2022 Carsten Herting (slu4)
 # -------------------------------------------------------------------------------
 # MIT LICENSE
 # Permission is hereby granted, free of charge, to any person obtaining a copy of
