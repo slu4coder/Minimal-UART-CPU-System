@@ -1,0 +1,1499 @@
+; --------------------------------------------------------------------------------------
+; MIN Programming Language 1.0 for the 'Minimal CPU System'
+; written by Carsten Herting 10.02.2022 - 31.05.2022
+; --------------------------------------------------------------------------------------
+
+#org 0xc000																										; build address
+								LDI 0xfe STA 0xffff                     			; init stack
+								LDI <file STA g_pc+0 LDI >file STA g_pc+1			; init MIN global state
+								CLB g_halt CLB g_sub CLB g_loop
+								CLB g_mind CLB g_tind LDI 1 STA g_cnt
+								CLB g_outind CLB g_rettyp
+								CLB usedcalls CLB usedvars CLW useddata
+								LDI <buffer STA bufptr+0 LDI >buffer STA bufptr+1
+								
+								JPS Program																		; execute the source code
+								LDI 10 OUT JPS _WaitUART JPA _Prompt					; return to OS prompt
+								
+; --------------------------------------------------------------------------------------
+; PARSING ROUTINES
+; --------------------------------------------------------------------------------------
+
+; looks for the current source char ignoring comments
+; push: #
+; pull: current char
+Look:						LDR g_pc CPI '#' BNE lookexit									; returns next character, ignores comments
+	lookon:					INW g_pc LDR g_pc
+									CPI 0 BEQ lookexit													; ENDMARKER
+									CPI 10 BNE lookon														; NEWLINE
+	lookexit:			STS 3 RTS
+
+; takes the current source char, measures indentation
+; push: #
+; pull: current char taken
+Take:						PHS JPS Look PLS STS 3 CPI 10 BNE takeno10
+									CLB g_mind LDI 1 STA g_cnt INW g_pc RTS			; switch on measurement after '\n'
+	takeno10:			LDA g_cnt CPI 0 BEQ takeexit
+									LDS 3 CPI ' ' BNE takenospace
+										LDI 1 STA g_cnt ADB g_mind INW g_pc RTS
+	takenospace:		CPI 9 BNE takenotab
+										LDI 2 STA g_cnt ADB g_mind INW g_pc RTS		
+	takenotab:			CLB g_cnt
+	takeexit:				INW g_pc RTS
+
+; looks for the next non-whitespace char
+; push: #
+; pull: next current char
+Next:						PHS
+	nextloop:			JPS Look LDS 1
+								CPI 9 BEQ nexttake
+								CPI 13 BEQ nexttake
+								CPI 32 BEQ nexttake
+								CPI 58 BEQ nexttake
+								CPI 59 BEQ nexttake
+									STS 4 PLS RTS
+	nexttake:			JPS Take JPA nextloop
+
+; grabs this char if it's the next char
+; push: char
+; pull: result (0: false, 1:true)
+Grab:						LDS 3 STA takechar
+								PHS JPS Next PLS CPA takechar BEQ grabtrue
+									LDI 0 STS 3 RTS
+	grabtrue:			PHS JPS Take PLS LDI 1 STS 3 RTS
+
+; asserts this char as next char, throws error otherwise
+; push: c
+; pull: #
+Assert:					LDS 3 PHS JPS Grab PLS CPI 0 BEQ asserterr
+									RTS
+	asserterr:		LDS 3 JPA Error
+
+; takes chars until (end including) the char c
+; push: char
+; pull: #
+TakeUntil:			LDS 3 STA takechar
+	takeuntloop:	PHS JPS Look PLS CPI 0 BEQ takeuntend
+									PHS JPS Take PLS CPA takechar BNE takeuntloop
+	takeuntend:		RTS
+
+; push: target indent
+; pull: #
+SkipToIndent:		PHS
+	SkipToInd1:		LDI 10 STS 1 JPS TakeUntil
+	skipwhile:		JPS Look LDS 1 CPI 0 BEQ skipend
+									JPS Next LDS 1 CPI 10 BEQ SkipToInd1
+										LDS 4 CPA g_mind BCC SkipToInd1
+	skipend:			PLS RTS
+		
+; tries to takes a specific string at the current position and returns the result
+; push: string_LSB, string_MSB
+; pull: #, result
+TakeThis:				LDS 3 STA strptr+1 LDS 4 STA strptr+0
+								LDA g_pc+0 PHS LDA g_pc+1 PHS														; push PC
+	takeloop:			LDR strptr CPI 0 BEQ taketrue
+								CPR g_pc BNE takefalse	
+									INW g_pc INW strptr JPA takeloop
+	taketrue:			PLS PLS LDI 1 STS 4 RTS																	; success: pull PC and return true
+	takefalse:		PLS STA g_pc+1 PLS STA g_pc+0 LDI 0 STS 4 RTS						; failure: pull PC and return false
+								
+	takechar:			0x00
+	takecount:		0x00
+
+; takes an alnum of max length 15 into 'name' buffer, error if too long
+; 'strptr' points to zero termination, stores length in 'takecount'
+TakeAlNum:			LDI <name STA strptr+0 LDI >name STA strptr+1						; first char needs no be an alpha
+								CLB takecount PHS JPS Look LDS 1
+								CPI '{' BCS takeaout																		; one above 'z'
+								CPI 'a' BCS takeisa
+								CPI '[' BCS takeaout																		; one above 'Z'
+								CPI 'A' BCC takeaout							
+	takeisa:				JPS Take LDS 1 STR strptr INW strptr INB takecount		; store the char
+	takeanloop:		LDR g_pc
+								CPI '{' BCS takeaout
+								CPI 'a' BCS takeisan
+								CPI '_' BEQ takeisan
+								CPI '[' BCS takeaout
+								CPI 'A' BCS takeisan
+								CPI ':' BCS takeaout																		; one above '9'
+								CPI '0' BCC takeaout
+		takeisan:			STR strptr INW g_pc INW strptr
+									INB takecount CPI 16 BCC takeanloop
+										LDI 1 JPA Error
+	takeaout:			LDI 0 STR strptr PLS RTS																; set null termination
+								
+; takes a specical character like '\n' or '\e' etc.
+; push: #
+; pull: char code
+TakeOrd:				LDR g_pc CPI '\' BNE takeordnot
+									INW g_pc LDR g_pc												; look at next character
+									CPI 'r' BNE takeo1 LDI 13 JPA takeordret
+	takeo1:					CPI 'n' BNE takeo2 LDI 10 JPA takeordret
+	takeo2:					CPI 't' BNE takeo3 LDI 9 JPA takeordret
+	takeo3:					CPI 'e' BNE takeo4 LDI 27 JPA takeordret
+	takeo4:					CPI '0' BNE takeordret LDI 0 JPA takeordret
+	takeordnot:		CPI 0 BNE takeordret
+									LDI 0 JPA Error
+	takeordret:		STS 3 INW g_pc RTS
+
+; --------------------------------------------------------------------------------------
+; GENERAL HELPER ROUTINES
+; --------------------------------------------------------------------------------------
+
+; push: array_type, array_lsb, array_msb
+; pull: #, bytes_msb, bytes_lsb
+ArrayBytes:			LDS 4 STA arrayptr+0 LDS 3 STA arrayptr+1
+								LDR arrayptr STA arraybts+0 INW arrayptr			; read out array element count
+								LDR arrayptr STA arraybts+1
+								LDS 5 LSL LSR CPI 'C' BEQ arrayb1							; read out array type
+									LDA arraybts+0 LSL STA arraybts+0
+									LDA arraybts+1 ROL STA arraybts+1
+	arrayb1:			LDI 2 ADW arraybts 
+								LDA arraybts+0 STS 5 LDA arraybts+1 STS 4 RTS	; add element count
+
+	arrayptr:			0x0000
+	arraybts:			0x0000
+
+; compare two arrays for equality
+; push: a_type, a_lsb, a_msb, abytes_lsb, abytes_msb, b_type, b_lsb, b_msb
+; pull: bool_result, #, #, #, #, #, #, #
+CompareArrays:	LDS 10 STA comptype LDS 5 CPA comptype BNE compfalse							; matching types?								
+								LDS 6 STA compaanz+1 LDS 7 STA compaanz+0													; bytesize of array incl. length								
+								LDS 9 STA compaptr+0 LDS 8 STA compaptr+1								
+								LDS 4 STA compbptr+0 LDS 3 STA compbptr+1
+	comploop:			DEW compaanz BCC comptrue
+									LDR compaptr CPR compbptr BNE compfalse
+									INW compaptr INW compbptr JPA comploop
+	comptrue:			LDI 1 STS 3 RTS
+	compfalse:		LDI 0 STS 3 RTS
+
+	comptype:			0x00
+	compaanz:			0x0000
+	compaptr:			0x0000
+	compbptr:			0x0000
+	
+; outputs an error number (later used as an index into a text database?) and the current line number
+; push: error number
+; pull: not necessary
+Error:					PHS LDI <errortxt PHS LDI >errortxt PHS JPS _Print PLS PLS
+								PLS STA intA+0 CLB intA+1 JPS int_print											; print error number in intA+0
+								LDA g_pc+1 CPI 0x80 BCS errornorm
+									LDI <includetxt PHS LDI >includetxt PHS JPS _Print PLS PLS
+									JPA errorret
+	errornorm:		LDI <inlinetxt PHS LDI >inlinetxt PHS JPS _Print PLS PLS
+								LDI <file STA strptr+0 LDI >file STA strptr+1
+								CLW intA INW intA																						; intA holds line number
+	errorloop:		LDR strptr CPI 10 BNE errorno10
+									INW intA																									; to determin the line number
+	errorno10:		LDA strptr+0 CPA g_pc+0 BNE errornopc
+									LDA strptr+1 CPA g_pc+1 BEQ erroratpc
+	errornopc:				INW strptr JPA errorloop
+	erroratpc:		JPS int_print																								; print line number
+	errorret:			LDI 10 OUT JPS _WaitUART
+								LDI 0xfe STA 0xffff
+								JPA _Prompt																									; reset stack and exit to OS prompt
+
+	errortxt:			10, 'ERROR ', 0
+	inlinetxt:		' in line ', 0
+	includetxt:		' in file', 0
+	errorline:		0x0000
+																				
+; compares two string for equality
+; push: a_lsb, a_msb, b_lsb, b_msb
+; pull: #, #, #, bool (0: strings are equal, 1: unequal)
+strcmp:					LDS 6 STA strptra+0 LDS 5 STA strptra+1
+								LDS 4 STA strptrb+0 LDS 3 STA strptrb+1
+	strcmploop:		LDR strptrb CPR strptra BNE strcmpfalse CPI 0 BEQ strcmpexit
+									INW strptrb INW strptra JPA strcmploop		
+	strcmpfalse:	LDI 1
+	strcmpexit:		STS 6 RTS
+
+; copies the content of a string to a buffer (no overlap!)
+; push: dest_lsb, dest_msb, src_lsb, src_msb
+; pull: #, #, #, #
+strcpy:					LDS 6 STA strptra+0 LDS 5 STA strptra+1
+								LDS 4 STA strptrb+0 LDS 3 STA strptrb+1
+	strcpyloop:		LDR strptrb STR strptra CPI 0 BEQ strcpyend
+									INW strptrb INW strptra JPA strcpyloop
+	strcpyend:		RTS
+
+	strptra:			0x0000
+	strptrb:			0x0000
+
+; --------------------------------------------------------------------------------------
+; CALL AND VAR HANDLER
+; --------------------------------------------------------------------------------------
+
+; stores a call 'name' and its current PC
+storeCall:			LDI <name STA callstr+0 LDI >name STA callstr+1
+								LDR callstr CPI 0 BNE storecallok
+									LDI 1 JPA Error
+	storecallok:	LDI <callmem STA callptr+0 LDI >callmem STA callptr+1
+								LDA usedcalls STA callcount CPI 40 BCC storecloop			; free slot available?
+									LDI 2 JPA Error
+	storecloop:		DEB callcount BCC storecfree
+								LDI <name PHS LDI >name PHS
+								LDA callptr+0 PHS LDA callptr+1 PHS
+								JPS strcmp LDI 3 ADB 0xffff
+								PLS CPI 0 BNE storecdiff
+									LDI 3 JPA Error
+	storecdiff:		LDI 20 ADW callptr JPA storecloop											; move to next slot
+										
+	storecfree:		LDA callptr+0 PHS LDA callptr+1 PHS										; copy name
+								LDI <name PHS LDI >name PHS
+								JPS strcpy LDI 4 ADB 0xffff
+								LDI 18 ADW callptr LDA g_pc+0 STR callptr							; store pc
+								INW callptr LDA g_pc+1 STR callptr
+								INB usedcalls	RTS 																		; one more used call
+								
+	callstr:			0x0000
+	callptr:			0x0000
+	callcount:		0x00
+	
+; push: #, #
+; pull: call_msb, call_lsb
+getCall:				LDI <name STA callstr+0 LDI >name STA callstr+1
+								LDI <callmem STA callptr+0 LDI >callmem STA callptr+1
+								LDA usedcalls STA callcount
+	getcloop:			DEB callcount BCC getcallnot
+								LDI <name PHS LDI >name PHS
+								LDA callptr+0 PHS LDA callptr+1 PHS
+								JPS strcmp LDI 3 ADB 0xffff PLS CPI 0 BEQ getcallyes
+									LDI 20 ADW callptr JPA getcloop										; move to next slot
+	getcallyes:		LDI 18 ADW callptr LDR callptr STS 4
+											 INW callptr LDR callptr STS 3 RTS
+	getcallnot:		LDI 0 STS 3 STS 4 RTS
+	
+; resize and discard part of the variable stack and data
+; push: newsize
+; pull: #
+resizeVar:			LDA usedvars LSL LSL STA varcount										; store x4
+								LSL STA varptr+0 LDI 0 ROL STA varptr+1							; x8
+								LDA varptr+0 LSL STA varptr+0 LDA varptr+1 ROL STA varptr+1		; x16
+								LDA varcount ADW varptr															; add x4 => x20
+								LDI <varmem ADW varptr LDI >varmem ADB varptr+1			; add varmem -> varptr points to the first free slot
+								LDI 3 SBW varptr																		; now points to the last "type" position
+	resizeloop:		LDS 3 CPA usedvars BCS resizeend										; need to resize?
+									LDR varptr LSL BCS resizenext											; it's only a ref without data
+										LDR varptr CPI 'i' BNE resizearray
+											LDI 2 SBW useddata JPA resizenext							; discard an int variable
+	resizearray:			PHS INW varptr LDR varptr PHS										; push type, array_lsb, array_msb
+										INW varptr LDR varptr PHS
+										JPS ArrayBytes PLS
+										PLS SBB useddata+1 PLS SBW useddata							; subtract array bytesize
+										LDI 2 SBW varptr																; back to type
+	resizenext:		LDI 20 SBW varptr DEB usedvars JPA resizeloop				; go down to previous type
+	resizeend:		RTS
+
+	varptr:				0x0000
+	dataptr:			0x0000
+	destptr:			0x0000
+	varcount:			0x00
+	vara:					0x00
+
+; make subidentifier from 'name'
+makeSubident:		LDI <name STA nameptr+0 LDI >name STA nameptr+1
+								LDI <subname STA subptr+0 LDI >subname STA subptr+1
+	makesloop:		LDR nameptr CPI 0 BEQ makeszero
+									STR subptr INW nameptr INW subptr JPA makesloop
+	makeszero:		LDI 128 ADA g_sub STR subptr INW subptr LDI 0 STR subptr
+								RTS
+
+	nameptr:			0x0000
+	subptr:				0x0000
+
+; get a reference to variable data, in 'name"
+; push: #, #, #
+; pull: ref_msb, ref_lsb, ref_typ
+getVarRef:			JPS makeSubident
+								LDI <varmem STA varptr+0 LDI >varmem STA varptr+1
+								LDA usedvars STA varcount
+	getvrloop:		DEB varcount BCC getvrnot
+									LDI <name PHS LDI >name PHS
+									LDA varptr+0 PHS LDA varptr+1 PHS
+									JPS strcmp LDI 3 ADB 0xffff PLS CPI 0 BEQ getvryes				; global var
+										LDI <subname PHS LDI >subname PHS
+										LDI 2 SBW 0xffff																	; ?? LDA varptr+0 PHS LDA varptr+1 PHS
+										JPS strcmp LDI 3 ADB 0xffff PLS CPI 0 BEQ getvryes			; local var
+											LDI 20 ADW varptr JPA getvrloop									; move to next slot
+	getvryes:			LDI 17 ADW varptr LDR varptr LSL SEC ROR STS 5				; mark as reference
+								INW varptr LDR varptr STS 4
+								INW varptr LDR varptr STS 3 RTS												; return (typ, refindex)
+	getvrnot:			LDI 4 JPA Error
+
+; get a copy of a variable
+; push: #, #, #
+; pull: copy_msb, copy_lsb, copy_typ
+getVarCopy:			JPS makeSubident
+								LDI <varmem STA varptr+0 LDI >varmem STA varptr+1
+								LDA usedvars STA varcount
+	getvcloop:		DEB varcount BCC getvcnot
+									LDI <name PHS LDI >name PHS													; entry equals ident?
+									LDA varptr+0 PHS LDA varptr+1 PHS
+									JPS strcmp LDI 3 ADB 0xffff PLS CPI 0 BEQ getvcyes				; => global var
+										LDI <subname PHS LDI >subname PHS									; entry equals subident?
+										LDI 2 SBW 0xffff																	; ?? LDA varptr+0 PHS LDA varptr+1 PHS
+										JPS strcmp LDI 3 ADB 0xffff PLS CPI 0 BEQ getvcyes			; => local var
+											LDI 20 ADW varptr JPA getvcloop									; check next slot
+	getvcyes:			LDI 17 ADW varptr LDR varptr LSL LSL LSL BCC getvcarray
+									LDI 'i' STS 5
+									INW varptr LDR varptr STA dataptr+0
+									INW varptr LDR varptr STA dataptr+1
+									LDR dataptr STS 4 INW dataptr
+									LDR dataptr STS 3 RTS																; return (typ, int_copy)
+	getvcarray:		LDR varptr LSL LSR STS 5															; mark as "non-reference" w/o bit 7
+								PHS INW varptr LDR varptr STA dataptr+0 PHS
+										INW varptr LDR varptr STA dataptr+1 PHS
+								JPS ArrayBytes PLS PLS STA varptr+1 PLS STA varptr+0	; reuse varptr to store bytesize
+								LDA bufptr+0 STA destptr+0 LDA bufptr+1 STA destptr+1
+	getvcloop2:		DEW varptr BCC getvcdone
+									LDR dataptr STR destptr
+									INW dataptr INW destptr JPA getvcloop2
+	getvcdone:		LDA bufptr+0 STS 4 LDA bufptr+1 STS 3 RTS							; return (typ, array_copy_ptr)
+	getvcnot:			LDI 4 JPA Error
+
+; creates or updates a variable entry in 'varmem' and 'data'
+; push: <name (reversed null-started)>, sublevel, type, expr_lsb, expr_msb
+; pull: #, #, #, #, <name (null-terminated)>
+storeVar:				LDS 5 CPI 0 BNE storetypeok														; check for any valid type
+									LDI 5 JPA Error
+	storetypeok:	LDS 7 CPI 0 BNE storenameok														; is there a valid name?
+									LDI 1 JPA Error
+
+	storenameok:	LDI <name STA nameptr+0 LDI >name STA nameptr+1				; generate name and name@ sub-identifier
+								LDI <subname STA subptr+0 LDI >subname STA subptr+1
+								LDA 0xffff ADI 7 STA stackptr+0												; point stackptr to namestart on stack
+								LDI 0xff STA stackptr+1
+	makeloop:			LDR stackptr STR nameptr CPI 0 BEQ makezero						; copy name
+									STR subptr INW stackptr INW nameptr INW subptr JPA makeloop
+	makezero:			LDS 6 ADI 128 STR subptr INW subptr LDI 0 STR subptr	; make subname
+
+								LDI <varmem STA varptr+0 LDI >varmem STA varptr+1
+								LDA usedvars STA varcount
+	storeloop:		DEB varcount BCC storenew
+									LDI <name PHS LDI >name PHS
+									LDA varptr+0 PHS LDA varptr+1 PHS
+									JPS strcmp LDI 3 ADB 0xffff PLS CPI 0 BEQ storeyes	; global var
+										LDI <subname PHS LDI >subname PHS
+										LDI 2 SBW 0xffff																	; LDA varptr+0 PHS LDA varptr+1 PHS
+										JPS strcmp LDI 3 ADB 0xffff PLS CPI 0 BEQ storeyes			; local var
+											LDI 20 ADW varptr JPA storeloop									; move to next slot
+	
+	storeyes:			LDI 17 ADW varptr																			; UPDATE EXISTING VARIABLE
+								LDR varptr LSL LSR STA vara														; type & 0x7f
+								LDS 5 LSL LSR CPA vara BEQ storeyesok									; do the types match?
+									LDI 6 JPA Error
+	storeyesok:		CPI 'i' BNE storeuparray
+									INW varptr LDR varptr STA dataptr+0									; update exisiting int variable
+									INW varptr LDR varptr STA dataptr+1									; dataptr holds adr of int data
+									LDS 4 STR dataptr INW dataptr
+									LDS 3 STR dataptr RTS							
+
+	storeuparray:	LDS 5 PHS LDS 5 PHS LDS 5 PHS	JPS ArrayBytes PLS			; get newbytes
+								PLS STA newbytes+1 STA deltabytes+1
+								PLS STA newbytes+0 STA deltabytes+0
+								LDS 4 STA newptr+0 LDS 3 STA newptr+1									; get newptr
+								INW varptr LDR varptr STA dataptr+0
+								INW varptr LDR varptr STA dataptr+1										; get old dataptr
+								LDS 5 PHS LDA dataptr+0 PHS LDA dataptr+1 PHS					; get oldbytes
+								JPS ArrayBytes PLS
+								PLS STA oldbytes+1 SBB deltabytes+1										; calculate deltabytes, too
+								PLS STA oldbytes+0 SBW deltabytes
+								
+								LDA deltabytes+1 ADB useddata+1
+								LDA deltabytes+0 ADW useddata
+								LDA useddata+1 CPI 0x04 BCC storeusedok
+									LDI 7 JPA Error
+	storeusedok:	LDA dataptr+0 STA store+0 STA store2+0								; MEMMOVE
+								LDA dataptr+1 STA store+1  STA store2+1
+								LDA newbytes+1 ADB store+1 LDA newbytes+0 ADW store
+								LDA store+0 PHS LDA store+1 PHS												; push dest								
+								LDA oldbytes+1 ADB store2+1 LDA oldbytes+0 ADW store2
+								LDA store2+0 PHS LDA store2+1 PHS											; push source
+								LDI <datamem STA store2+0 LDI >datamem STA store2+1
+								LDA useddata+1 ADB store2+1 LDA useddata+0 ADW store2
+								LDA store+1 SBB store2+1 LDA store+0 SBW store2
+								LDA store2+0 PHS LDA store2+1 PHS											; push source
+								JPS _MemMove LDI 6 ADB 0xffff													; move it with overlap allowed!
+
+								LDI 19 ADW varptr																			; now points to next var's pointer LSB
+	storeuploop:	DEB varcount BCC storeupdone
+									LDR varptr STA store+0 STA store2+0 INW varptr
+									LDR varptr STA store+1 STA store2+1									; data pointer of younger variables
+									LDA dataptr+1 SBB store2+1 BCC storeupex
+									LDA dataptr+0 SBW store2 BCC storeupex
+									LDI 0 CPA store2+1 BNE storeupup CPA store2+0 BEQ storeupex ; only enter if hptr > dataptr
+	storeupup:				LDA deltabytes+1 ADB store+1 LDA deltabytes+0 ADW store
+										DEW varptr LDA store+0 STR varptr									; write back	
+										INW varptr LDA store+1 STR varptr
+	storeupex:		LDI 19 ADW varptr JPA storeuploop											; move to next slot
+
+	storeupdone:	DEW newbytes BCC storeupexit													; memcopy
+								LDR newptr STR dataptr
+								INW newptr INW dataptr JPA storeupdone
+	storeupexit:	RTS
+								
+	storenew:			LDA usedvars CPI 59 BCC storenewok										; STORE AS NEW ENTRY
+									LDI 8 JPA Error
+	storenewok:		INB usedvars																					; reserve a new var slot
+								LDA varptr+0 PHS LDA varptr+1 PHS
+								LDA g_tind CPI 0 BNE storesubi												; only use original ident if indentation = 0
+									LDI <name PHS LDI >name PHS
+									JPA storesubin
+	storesubi:		LDI <subname PHS LDI >subname PHS
+	storesubin:		JPS strcpy LDI 4 ADB 0xffff
+								LDI 17 ADW varptr LDS 5 STR varptr
+								LSL BCC storetestint																	; is expression a reference?
+									INW varptr LDS 4 STR varptr													; store as a reference
+									INW varptr LDS 3 STR varptr
+									RTS
+
+	storetestint:	LSR CPI 'i' BNE storeasarray													; it expr an integer?
+									LDI <datamem STA dataptr+0 LDI >datamem ADA useddata+1 STA dataptr+1
+									LDA useddata+0 ADW dataptr+0 LDI 2 ADW useddata			; int32_t* dataptr = (int32_t*)(datamem + useddata)
+									LDA useddata+1 CPI 0x04 BCC storenewio
+										LDI 7 JPA Error
+	storenewio:			INW varptr LDA dataptr+0 STR varptr									; *(uint64_t*)(ptr+POS) = (uint64_t)dataptr
+									INW varptr LDA dataptr+1 STR varptr
+									LDS 4 STR dataptr INW dataptr												; *dataptr = int32_t(e.second)
+									LDS 3 STR dataptr
+									RTS
+
+	storeasarray:	LDS 5 PHS LDS 5 PHS LDS 5 PHS JPS ArrayBytes PLS			; get array bytesize
+								PLS STA newbytes+1 PLS STA newbytes+0
+								LDS 4 STA newptr+0 LDS 3 STA newptr+1
+								LDI <datamem STA dataptr+0 LDI >datamem ADA useddata+1 STA dataptr+1
+								LDA useddata+0 ADW dataptr+0
+								LDA newbytes+1 ADB useddata+1 LDA newbytes+0 ADW useddata
+								LDA useddata+1 CPI 0x04 BCC storenewioa
+									LDI 7 JPA Error
+	storenewioa:	INW varptr LDA dataptr+0 STR varptr										; *(uint64_t*)(ptr+POS) = (uint64_t)dataptr
+								INW varptr LDA dataptr+1 STR varptr
+	storenewloop:	DEW newbytes BCC storendone
+									LDR newptr STR dataptr
+									INW newptr INW dataptr JPA storenewloop
+	storendone:		RTS
+								
+	newptr:				0x0000
+	newbytes:			0x0000
+	oldbytes:			0x0000
+	deltabytes:		0x0000
+	store:				0x0000
+	store2:				0x0000
+	stackptr:			0x0000
+	
+; --------------------------------------------------------------------------------------
+; MATH EXPRESSIONS
+; --------------------------------------------------------------------------------------
+
+MathFactor:			CLW intA PHS JPS Next PLS												; clear reg and advance to next real char
+								CPI '(' BNE mfachex															; CHECK FOR ( EXPR )
+									INW g_pc LDI 0 PHS JPS MathExpr PLS						; Take() and read math expression
+									LDI ')' PHS JPS Assert PLS RTS
+
+	mfachex:			CPI '0' BNE mfacdig															; CHECK FOR HEX
+									INW g_pc LDR g_pc CPI 'x' BEQ mfacishex
+										DEW g_pc JPA mfacdig												; go back one step
+	mfacishex:		INW g_pc																				; take "x"
+								CLW mreg LDI 0xf0 STA mreg+2		; read hex into mreg
+  hxgetchar:    LDR g_pc                 				; input lesen
+                CPI 'g' BCS hxdone 	            ; above f? -> melde Fehler!
+                CPI 'a' BCS hxletter            ; a..f?
+                CPI ':' BCS hxdone   	          ; above 9? -> Separator: Zurück, wenn was da ist, sonst übergehen.
+                CPI '0' BCS hxzahl              ; 0..9?
+  hxdone:       LDA mreg+0 STA intA+0 LDA mreg+1 STA intA+1			; copy C -> A
+								LDA mreg+2 CPI 0 BEQ mfacrts		; check status
+									LDI 5 JPA Error
+	hxletter:     SBI 39
+  hxzahl:       SBI 48
+                PHS LDI 4 STA mcount          ; shift existing hex data 4 steps to the left
+  hxshiftloop:  LDA mreg+0 LSL STA mreg+0
+                LDA mreg+1 ROL STA mreg+1
+                LDA mreg+2 ROL STA mreg+2
+                DEB mcount BNE hxshiftloop
+                  PLS ADB mreg+0         ; add new hex nibble (carry cannot happen)
+                  INW g_pc JPA hxgetchar
+
+	mfacdig:			LDR g_pc SBI '0' BCC mfacord										; CHECK FOR DIGIT 0-9
+									CPI 10 BCS mfacord
+	mfacdigloop:			PHS INW g_pc																; store and Take() digit
+										LDA intA+0 LSL STA intA+0 STA mreg+0 LDA intA+1 ROL STA intA+1 STA mreg+1	; A x 2 -> A and C
+										LDA intA+0 LSL STA intA+0 LDA intA+1 ROL STA intA+1
+										LDA intA+0 LSL STA intA+0 LDA intA+1 ROL STA intA+1	; x8
+										LDA mreg+1 ADB intA+1 LDA mreg+0 ADW intA		; A -> A x 10
+										PLS ADW intA																; add digit
+										LDR g_pc SBI '0' BCC mfacrts CPI 10 BCS mfacrts		; read next digit 0-9
+											JPA mfacdigloop
+
+	mfacord:			LDR g_pc CPI 39 BNE mfackey															; CHECK FOR 'x'
+									INW g_pc PHS JPS TakeOrd PLS STA intA+0
+									LDI 39 PHS JPS Assert PLS RTS
+
+	mfackey:			LDI <keystr PHS LDI >keystr PHS JPS TakeThis PLS PLS				; CHECK FOR key()
+								CPI 0 BEQ mfacrnd
+									LDI '(' PHS JPS Assert PLS LDI ')' PHS JPS Assert PLS
+									INP STA intA+0 RTS
+
+	mfacrnd:			LDI <rndstr PHS LDI >rndstr PHS JPS TakeThis PLS PLS				; CHECK FOR rnd()
+								CPI 0 BEQ mfaclen
+									LDI '(' PHS JPS Assert PLS LDI ')' PHS JPS Assert PLS
+									PHS JPS _Random PLS STA intA+0 RTS
+
+	mfaclen:			LDI <lenstr PHS LDI >lenstr PHS JPS TakeThis PLS PLS				; CHECK FOR len(..)
+								CPI 0 BEQ mfaccall
+									LDI '(' PHS JPS Assert PLS
+									LDI 3 SBB 0xffff LDI 0 PHS JPS ArrayExpr PLS PLS STA mreg+1 PLS STA mreg+0		; get pointer to array data
+									PLS LSL LSL LSL BCC mfacisarray														; check for type array
+										LDI 9 JPA Error																					; not an array!
+	mfacisarray:		LDR mreg STA intA+0 INW mreg LDR mreg STA intA+1					; extract length
+									LDI ')' PHS JPS Assert PLS RTS
+
+	mfaccall:			JPS TakeAlNum																								; CHECK FOR CALL OR VAR
+								PHS PHS JPS getCall
+								LDS 1 CPI 0 BNE mfacdocall
+									LDS 2 CPI 0 BEQ mfacvar
+	mfacdocall:				JPS DoCall PLS PLS
+										LDA g_rettyp PHS LDA g_retptr+0 PHS LDA g_retptr+1 PHS	; ret expr on stack
+										JPA mfaccheck
+	mfacvar:				PHS JPS getVarCopy	; reuse the 2 containers already pushed and push a 3rd container
+	
+	mfaccheck:		LDS 3 LSL LSL LSL BCS mfacnoarray			; check type
+									LDI 1 PHS JPS Array PLS							; push use = true hinterher
+									LDS 3 LSL LSL LSL BCS mfacnoarray
+										LDI 10 JPA Error									; still an array!
+	mfacnoarray:	PLS STA intA+1 PLS STA intA+0 PLS			; extract value, discard type
+	mfacrts:			RTS
+
+	mcount:				0x00
+	mreg:					0x0000, 0x00
+	
+	keystr:				'key', 0
+	lenstr:				'len', 0
+	rndstr:				'rnd', 0
+
+MathInv:				PHS JPS Next PLS CPI '~' BNE mathinorm
+									INW g_pc JPS MathFactor														; Take()
+									NEW intA DEW intA RTS															; ~a = -a - 1
+	mathinorm:		JPS MathFactor RTS
+
+; push: bool_use
+; pull: #
+MathBitwise:		LDS 3 CPI 1 BEQ mathbuse															; use existing value in intA?
+									JPS MathInv
+	mathbuse:			PHS JPS Next PLS
+
+								CPI '&' BNE mathb2
+									INW g_pc LDA intA+0 PHS LDA intA+1 PHS						; Take() and push A
+									JPS MathInv JPS int_AtoB													; read 2nd into B
+									PLS STA intA+1 PLS STA intA+0											; pull A
+									JPS int_and JPA mathbuse
+
+	mathb2:				CPI '|' BNE mathb3
+									INW g_pc LDA intA+0 PHS LDA intA+1 PHS						; Take() and push A
+									JPS MathInv JPS int_AtoB													; read 2nd into B
+									PLS STA intA+1 PLS STA intA+0											; pull A
+									JPS int_or JPA mathbuse
+
+	mathb3:				CPI '^' BNE mathb4
+									INW g_pc LDA intA+0 PHS LDA intA+1 PHS						; Take() and push A
+									JPS MathInv JPS int_AtoB													; read 2nd into B
+									PLS STA intA+1 PLS STA intA+0											; pull A
+									JPS int_xor JPA mathbuse
+
+	mathb4:				CPI '<' BNE mathb5
+									INW g_pc LDR g_pc CPI '<' BEQ mathb4ok
+										DEW g_pc JPA mathb5
+	mathb4ok:				INW g_pc LDA intA+0 PHS LDA intA+1 PHS						; Take() and push A
+									JPS MathInv JPS int_AtoB													; read 2nd into B
+									PLS STA intA+1 PLS STA intA+0											; pull back A
+									JPS int_lsl JPA mathbuse
+
+	mathb5:				CPI '>' BNE mathb6
+									INW g_pc LDR g_pc CPI '>' BEQ mathb5ok
+										DEW g_pc JPA mathb6
+	mathb5ok:				INW g_pc LDA intA+0 PHS LDA intA+1 PHS						; Take() and push A
+									JPS MathInv JPS int_AtoB													; read 2nd into B
+									PLS STA intA+1 PLS STA intA+0											; pull back A
+									JPS int_lsr JPA mathbuse
+
+	mathb6:				RTS
+
+; push: bool_use
+; pull: #
+MathTerm:				LDS 3 PHS JPS MathBitwise PLS
+	mathtloop:		PHS JPS Next PLS
+								CPI '*' BEQ mathtmul CPI '/' BEQ mathtdiv
+									RTS
+
+	mathtmul:			INW g_pc LDA intA+0 PHS LDA intA+1 PHS						; Take() and push A
+								LDI 0 PHS JPS MathBitwise PLS JPS int_AtoB				; read 2nd into B
+								PLS STA intA+1 PLS STA intA+0											; pull A back
+								JPS int_mul JPA mathtloop
+
+	mathtdiv:			INW g_pc LDA intA+0 PHS LDA intA+1 PHS						; Take() and push A
+								LDI 0 PHS JPS MathBitwise PLS JPS int_AtoB				; read 2nd into B
+								PLS STA intA+1 PLS STA intA+0											; pull A back
+								JPS int_div JPA mathtloop
+
+; push: bool_use
+; pull: #
+MathExpr:				LDS 3 CPI 0 BEQ matheelif
+									PHS JPS MathTerm PLS JPA matheloop							; with "use=1"
+	matheelif:		PHS JPS Next PLS CPI '-' BNE matheelse
+									INW g_pc LDI 0 PHS JPS MathTerm PLS
+									NEW intA JPA matheloop													; negate term in A after leading -
+	matheelse:		CPI '+' BNE mathenoplus
+									INW g_pc																				; take only a '+'
+	mathenoplus:	LDI 0 PHS JPS MathTerm PLS
+
+	matheloop:		PHS JPS Next PLS
+								CPI '+' BEQ matheadd CPI '-' BEQ mathesub
+									RTS
+
+	matheadd:			INW g_pc LDA intA+0 PHS LDA intA+1 PHS						; Take() and push A
+								LDI 0 PHS JPS MathTerm PLS JPS int_AtoB						; read 2nd into B
+								PLS STA intA+1 PLS STA intA+0											; pull A back
+								JPS int_add JPA matheloop
+
+	mathesub:			INW g_pc LDA intA+0 PHS LDA intA+1 PHS						; Take() and push A
+								LDI 0 PHS JPS MathTerm PLS JPS int_AtoB						; read 2nd into B
+								PLS STA intA+1 PLS STA intA+0											; pull A back
+								JPS int_sub JPA matheloop
+
+; --------------------------------------------------------------------------------------
+; ARRAY EXPRESSIONS
+; --------------------------------------------------------------------------------------
+
+; push: #(typ), #(lsb), #(msb), bool_use (, return_LSB, return_MSB)
+; pull: #, exp_msb, exp_lsb, exp_typ
+Array:					LDS 3 CPI 1 BEQ arraywhile														; USE supplied array?
+									
+									LDI '[' PHS JPS Grab PLS CPI 0 BEQ array2						; [..]
+										LDI 'I' STS 6																			; store type int[]
+										LDA bufptr+0 STA arrptr+0 STS 5
+										LDA bufptr+1 STA arrptr+1 STS 4										; copy buffer pointer
+										LDI 2 ADW arrptr CLW arranz												; arrptr points to free buffer pos
+	array1loop:				LDI ']' PHS JPS Grab PLS CPI 1 BEQ array1done
+											INW arrptr LDA arrptr+1 CPI 0xf0 BCC array1ok		; see if 2 bytes fit below 0xf0..
+												LDI 13 JPA Error															; array buffer overflow
+	array1ok:						DEW arrptr																			; take back the data pointer, anz++
+											LDI ',' PHS JPS Grab PLS
+											LDI 0 PHS JPS MathExpr PLS
+											LDA intA+0 STR arrptr INW arrptr								; store the math result in array
+											LDA intA+1 STR arrptr INW arrptr
+											INW arranz JPA array1loop												; anz++											
+	array1done:				LDA arranz+0 STR bufptr INW bufptr								; store element count at *(bufptr)
+										LDA arranz+1 STR bufptr DEW bufptr
+										JPA arraywhile
+
+	array2:					LDR g_pc CPI '"' BNE array4													; "{char}", array3: with str(), array4: w/o
+										INW g_pc LDI 'C' STS 6														; take '"', store type char[]
+										LDA bufptr+0 STA arrptr+0 STS 5
+										LDA bufptr+1 STA arrptr+1 STS 4										; copy buffer pointer
+										LDI 2 ADW arrptr CLW arranz												; arrptr points to free buffer pos
+	array2loop:				LDR g_pc CPI '"' BEQ array2done
+											LDA arrptr+1 CPI 0xf0 BCC array2ok							; buffer ends below 0xf000
+												LDI 13 JPA Error															; array buffer overflow
+	array2ok:						INW arranz PHS JPS TakeOrd PLS									; anz++, take ord()
+											STR arrptr INW arrptr JPA array2loop
+	array2done:				INW g_pc																					; take "
+										LDA arranz+0 STR bufptr INW bufptr								; store element count at *(bufptr)
+										LDA arranz+1 STR bufptr DEW bufptr
+										JPA arraywhile
+
+	array4:					JPS TakeAlNum
+									PHS PHS JPS getCall																	; CHECK FOR CALL OR VAR	
+									LDS 1 CPI 0 BNE arraydocall
+										LDS 2 CPI 0 BEQ arrayvar
+	arraydocall:				JPS DoCall PLS PLS
+											LDA g_rettyp STS 6 LDA g_retptr+0 STS 5 LDA g_retptr+1 STS 4	; transfer to initial container
+											CLB g_rettyp JPA arraywhile
+	arrayvar:					PHS JPS getVarCopy																; use two earlier pushes
+										PLS STS 6 PLS STS 6 PLS STS 6											; transfer back to initial container
+
+	arraywhile:		LDI '[' PHS JPS Grab PLS CPI 0 BEQ arrayrts						; BACK-END FOR PRE-SCANNED ARRAYS
+									LDS 6 PHS LDS 6 PHS LDS 6 PHS JPS ArrayBytes PLS 		; push byte size of array on stack
+									LDS 1 ADB bufptr+1 LDS 2 ADW bufptr									; buf += abytes, use stack value
+
+									LDI 0 PHS JPS MathExpr PLS
+									LDA intA+0 STA arri0+0 STA arranz+0									; intA -> i0, arranz for later validity check
+									LDA intA+1 STA arri0+1 STA arranz+1
+
+									LDS 6 STA arrptr+1 LDS 7 STA arrptr+0 							; extract arrptr AFTER MathExptr
+
+									LDI ']' PHS JPS Grab PLS CPI 0 BEQ arrslice					; ELEMENT OPERATOR ?
+										PLS SBB bufptr+1 PLS SBW bufptr										;	buf -= abytes and stack cleanup
+										LDS 6 LSL LSL LSL BCC arraywisarr
+											LDI 22 JPA Error																; element access without array
+	arraywisarr:			LDA arri0+1 CPI 0 BPL arraywi0pos
+	arraywbadi:					LDI 21 JPA Error																; invalid index
+	arraywi0pos:			LDR arrptr SBW arranz BCC arraywisok1
+										INW arrptr LDR arrptr SBB arranz+1 BCC arraywisok2
+											JPA arraywbadi									
+	arraywisok1:			INW arrptr											; arrptr now points at data section
+	arraywisok2:			INW arrptr
+										LDA arri0+0 ADW arrptr LDA arri0+1 ADB arrptr+1		; add i0 to arrptr
+										LDS 6 LSL LSR CPI 'C' BEQ arraywchar
+											LDI 'i' STS 6
+											LDA arri0+0 ADW arrptr LDA arri0+1 ADB arrptr+1	; arrptr now points to int i0
+											LDR arrptr STS 5 INW arrptr LDR arrptr STS 4
+											JPA arraywhile
+	arraywchar:				LDI 'i' STS 6
+										LDR arrptr STS 5 LDI 0 STS 4
+										JPA arraywhile
+
+	arrslice:				LDI '.' PHS JPS Assert JPS Assert PLS 									; SLICE OPERATOR
+									LDI 0 PHS JPS MathExpr PLS															; extract i1
+									LDA intA+0 STA arri1+0 LDA intA+1 STA arri1+1
+									PLS SBB bufptr+1 PLS SBW bufptr													;	buf -= abytes and stack cleanup
+									LDI ']' PHS JPS Assert PLS
+									LDR arrptr STA arranz+0 INW arrptr											; extract anz
+									LDR arrptr STA arranz+1 DEW arrptr
+
+									LDA arri0+1 CPI 0 BMI sliceelse															; if check
+									LDA arri0+0 STA arrreg+0 LDA arri0+1 STA arrreg+1
+									LDA arranz+0 SBW arrreg BCC slice1ok
+										LDA arranz+1 SBB arrreg+1 BCS sliceelse									
+	slice1ok:				LDA arri0+0 STA arrreg+0 LDA arri0+1 STA arrreg+1
+									LDA arri1+0 SBW arrreg BCC slice2ok
+										LDA arri1+1 SBB arrreg+1 BCS sliceelse
+	slice2ok:				LDA arranz+0 STA arrregb+0 LDA arranz+1 STA arrregb+1
+									LDA arri1+0 SBW arrregb BCC slice3ok
+										LDA arri1+1 SBB arrregb+1 BCS sliceover
+	slice3ok:						LDA arranz+0 STA arri1+0 LDA arranz+1 STA arri1+1
+	sliceover:			LDA arri0+1 SBB arri1+1 LDA arri0+0 SBW arri1								; i1 = i1 - i0
+
+									LDA arri1+0 STR arrptr INW arrptr														; store i1-i0
+									LDA arri1+1 STR arrptr INW arrptr
+
+									LDA arrptr+0 STA arrsrc+0 LDA arrptr+1 STA arrsrc+1					; arrptr = dest, arrsrc =src
+									LDA arri0+0 ADW arrsrc LDA arri0+1 ADB arrsrc+1							; ADD of i0 to src
+									LDS 6 LSL LSR CPI 'C' BEQ slicemove
+										LDA arri0+0 ADW arrsrc LDA arri0+1 ADB arrsrc+1						; 2nd ADD of i0 to src
+										LDA arri1+0 LSL STA arri1+0 LDA arri1+1 ROL STA arri1+1 	; 2 x (i1 - i0)
+	slicemove:			DEW arri1 BCC arraywhile
+										LDR arrsrc STR arrptr INW arrsrc INW arrptr JPA slicemove
+
+	sliceelse:			LDI 0 STR arrptr INW arrptr LDI 0 STR arrptr
+									JPA arraywhile
+	arrayrts:			RTS
+
+	astptr:				0x0000
+	astanz:				0x0000
+	arrptr:				0x0000
+	arrsrc:				0x0000
+	arranz:				0x0000
+	arri0:				0x0000
+	arri1:				0x0000
+	arrreg:				0x0000
+	arrregb:			0x0000
+
+; push: #(typ), #(lsb), #(msb), bool_use
+; pull: #, exp_msb, exp_lsb, exp_typ
+ArrayExpr:			LDS 6 PHS  LDS 6 PHS  LDS 6 PHS  LDS 6 PHS				; do repush
+								JPS Array																					; use the parameters pushed for ArrayExpr
+	arrayeloop:		LDS 4 LSL LSL LSL BCS arrayeexit									; check if TYPE is still array
+									LDI '+' PHS JPS Grab PLS CPI 0 BEQ arrayeexit
+										LDS 4 PHS LDS 4 PHS LDS 4 PHS JPS ArrayBytes	; repush array expr (type, lsb, msb) to get bytes
+										PLS LDS 1 ADB bufptr+1												; RECURSION SAFETY: leave arraybytes on stack
+												LDS 2 ADW bufptr													; move bufptr up to free area for next Array
+
+										LDA bufptr+1 PHS LDA bufptr+0 PHS							; RECURSION SAFETY: push "dest for move"											
+										LDI 3 SBB 0xffff LDI 0 PHS JPS Array PLS			; read in another Array b
+										PLS STA arrayebptr+1 PLS STA arrayebptr+0 		; store addr of b
+										PLS STA arrayebtype														; store type of b
+										PLS STA arraye2ptr+0 PLS STA arraye2ptr+1			; RECURSION SAFETY: pull "move dest"
+										
+										LDS 6 CPA arrayebtype BEQ arrayetypok					; check types
+											LDI 6 JPA Error															; type mismatch
+	arrayetypok:			LDR arrayebptr STA arrayebanz+0 STA arrayebbytes+0 INW arrayebptr	; holds number of data bytes
+										LDR arrayebptr STA arrayebanz+1 STA arrayebbytes+1 INW arrayebptr	; points to b data section
+										LDA arrayebtype CPI 'I' BNE arrayenoint
+											LDA arrayebbytes+0 LSL STA arrayebbytes+0		; x2 for int
+											LDA arrayebbytes+1 ROL STA arrayebbytes+1
+	arrayenoint:			DEW arrayebbytes BCC arrayemoved
+											LDR arrayebptr STR arraye2ptr INW arrayebptr INW arraye2ptr JPA arrayenoint
+
+	arrayemoved:			PLS SBB bufptr+1 PLS SBW bufptr+0							; free upper buffer									
+										LDR bufptr STA arrayeaanz+0 INW bufptr				; get aanz
+										LDR bufptr STA arrayeaanz+1 DEW bufptr
+										LDA arrayebanz+1 ADB arrayeaanz+1							; add banz
+										LDA arrayebanz+0 ADW arrayeaanz+0
+										LDA arrayeaanz+0 STR bufptr INW bufptr				; store aanz
+										LDA arrayeaanz+1 STR bufptr DEW bufptr
+									JPA arrayeloop
+	arrayeexit:		PLS  PLS STS 6  PLS STS 6  PLS STS 6							; do backpush
+								RTS
+
+	arrayeaanz:		0x0000																						; use this ONLY without recursion!
+	arrayebbytes:	0x0000
+	arrayebtype:	0x00
+	arrayebptr:		0x0000
+	arrayebanz:		0x0000
+	arraye2ptr:		0x0000
+
+; --------------------------------------------------------------------------------------
+; BOOLEAN EXPRESSIONS
+; --------------------------------------------------------------------------------------
+
+; push: #
+; pull: bool_result
+BooleanFactor:	PHS JPS Next PLS
+								LDI <notstr PHS LDI >notstr PHS JPS TakeThis PLS		; "not" remains on stack
+								LDI 3 SBB 0xffff JPS Expr										; will be cleaned up upon exit
+								PHS JPS Next PLS
+								LDS 3 LSL LSL LSL BCS boolfnotarr				; check for expr type array
+									
+									LDS 3 PHS LDS 3 PHS LDS 3 PHS JPS ArrayBytes PLS						; ***** ARRAYS *****
+									LDS 1 ADB bufptr+1 LDS 2 ADW bufptr		; claim buffer
+									LDR g_pc
+									CPI '=' BNE boolfa2										; e == ..
+										INW g_pc LDI '=' PHS JPS Assert PLS
+											LDI 3 SBB 0xffff LDI 0 PHS JPS ArrayExpr PLS
+											JPS CompareArrays PLS JPA boolfareuse		; pull compare result
+	boolfa2:				CPI '!' BNE boolfa3
+										INW g_pc LDI '=' PHS JPS Assert PLS
+											LDI 3 SBB 0xffff LDI 0 PHS JPS ArrayExpr PLS
+											JPS CompareArrays PLS NEG INC						; pull compare result 
+	boolfareuse:				STS 11 PLS PLS JPA boolfafree						; store result in container and clean up
+	boolfa3:				LDS 1 CPI 0 BNE boolfatrue
+										LDS 2 CPI 0 BNE boolfatrue
+											LDI 0 JPA boolfstore
+	boolfatrue:				LDI 1 	
+	boolfstore:				STS 9																			; store result in contaienr
+	boolfafree:			PLS SBB bufptr+1 PLS SBW bufptr							; only now free the buffer
+									LDS 7 CPI 0 BEQ boolffalse									; return true or false for "not" check
+										JPA boolftrue
+
+	boolfnotarr:	LDR g_pc																		; ***** INTEGER VALUES *****	
+								CPI '=' BNE boolf2													; e == intA?
+									INW g_pc LDI '=' PHS JPS Assert PLS
+									LDI 0 PHS JPS MathExpr PLS
+									LDS 1 CPA intA+1 BNE boolffalse
+										LDS 2 CPA intA+0 BNE boolffalse
+											JPA boolftrue
+	boolf2:				CPI '<' BNE boolf3													; e < intA?
+									LDS 1 STA boolf+1 LDS 2 STA boolf+0				; extract first argument
+									INW g_pc LDR g_pc CPI '=' BNE boolfless
+										INW g_pc DEW boolf											; e <= intA <=> e-1 < intA
+  boolfless:			LDI 0 PHS JPS MathExpr PLS
+									LDA intA+1 SBB boolf+1 LDA intA+0 SBW boolf BMI boolftrue
+										JPA boolffalse
+	boolf3:				CPI '!' BNE boolf4													; e != intA
+									INW g_pc LDI '=' PHS JPS Assert PLS
+									LDI 0 PHS JPS MathExpr PLS
+									LDS 1 CPA intA+1 BNE boolftrue
+										LDS 2 CPA intA+0 BEQ boolffalse
+											JPA boolftrue
+	boolf4:				CPI '>' BNE boolf5													; e > intA?
+									LDS 1 STA boolf+1 LDS 2 STA boolf+0				; extract first argument
+									INW g_pc LDR g_pc CPI '=' BNE boolfgreater
+										INW g_pc INW boolf											; e >= intA <=> e+1 > intA
+  boolfgreater:		LDI 0 PHS JPS MathExpr PLS
+									LDA boolf+1 SBB intA+1 LDA boolf+0 SBW intA BMI boolftrue
+										JPA boolffalse
+	boolf5:				LDS 1 CPI 0 BNE boolftrue										; no operator
+									LDS 2 CPI 0 BEQ boolffalse
+
+	boolftrue:		LDS 4 INC JPA boolfreturn
+	boolffalse:		LDS 4
+	boolfreturn:	LSR LDI 0 ROL STS 7											; keep only lowest bit (=XOR)
+								LDI 4 ADB 0xffff RTS											; clean up Expr, pull "not" result
+
+	boolf:				0x0000																	; only used as local register
+
+; push: #
+; pull: bool_result
+BooleanTerm:		PHS JPS BooleanFactor								; first result remains on stack
+	booltloop:		PHS JPS Next PLS
+								LDI <andstr PHS LDI >andstr PHS JPS TakeThis PLS PLS CPI 0 BEQ booltreturn
+									PHS JPS BooleanFactor PLS CPI 0 BNE booltloop
+										STS 1 JPA booltloop						; overwrite only with 0
+	booltreturn:	PLS STS 3 RTS											; pull result from stack
+
+; push: #
+; pull: bool_result
+BooleanExpr:		PHS JPS BooleanTerm								; first result remains on stack
+	booleloop:		PHS JPS Next PLS
+								LDI <orstr PHS LDI >orstr PHS JPS TakeThis PLS PLS CPI 0 BEQ boolereturn
+									PHS JPS BooleanTerm PLS CPI 0 BEQ booleloop
+										STS 1 JPA booleloop						; overwrite only with 1
+	boolereturn:	PLS STS 3 RTS											; pull result from stack
+	
+	notstr:				'not', 0
+	andstr:				'and', 0
+	orstr:				'or', 0
+
+; --------------------------------------------------------------------------------------
+; GENERAL EXPRESSIONS
+; --------------------------------------------------------------------------------------
+
+; push: #, #, #
+; pull: exp_msb, exp_lsb, exp_typ
+Expr:						PHS JPS Next PLS
+								CPI '[' BEQ exprarray CPI '"' BEQ exprarray
+									LDA g_pc+0 PHS LDA g_pc+1 PHS								; push g_pc onto stack
+									JPS TakeAlNum LDA takecount CPI 0 BEQ exprmath CPI 3 BNE exprusual
+										LDI <keystr PHS LDI >keystr PHS LDI <name PHS LDI >name PHS
+										JPS strcmp LDI 3 ADB 0xffff PLS CPI 0 BEQ exprmath
+											LDI <lenstr PHS LDI >lenstr PHS LDI 2 SBB 0xffff
+											JPS strcmp LDI 3 ADB 0xffff PLS CPI 0 BEQ exprmath
+												LDI <rndstr PHS LDI >rndstr PHS LDI 2 SBB 0xffff
+												JPS strcmp LDI 3 ADB 0xffff PLS CPI 0 BEQ exprmath
+									
+	exprusual:			JPS getCall																	; use 2 existing pushes
+									LDS 1 CPI 0 BNE exprdocall
+										LDS 2 CPI 0 BEQ exprvar
+	exprdocall:					JPS DoCall PLS PLS
+											LDA g_rettyp STS 5 LDA g_retptr+0 STS 4 LDA g_retptr+1 STS 3
+											JPA exprcheck
+	
+	exprvar:					PHS JPS getVarCopy												; use 2 upper pushes
+										LDS 1 STS 6 LDS 2 STS 7 LDS 3 STS 8
+										LDI 3 ADB 0xffff
+	
+	exprcheck:			LDS 5 LSL LSL LSL BCS exprelse
+										LDS 5 PHS LDS 5 PHS LDS 5 PHS LDI 1 PHS
+										JPS Array PLS
+										LDS 1 STS 6 LDS 2 STS 7 LDS 3 STS 8
+										LDI 3 ADB 0xffff
+										LDS 5 LSL LSL LSL	BCS exprelse
+
+											LDS 5 PHS  LDS 5 PHS  LDS 5 PHS  LDI 1 PHS
+											JPA exprarrgo
+
+	exprelse:				LDS 4 STA intA+0 LDS 3 STA intA+1
+									LDI 1 PHS JPS MathExpr PLS
+									LDA intA+0 STS 4 LDA intA+1 STS 3
+									RTS
+											
+	exprmath:				PLS STA g_pc+1 PLS STA g_pc+0								; claim back pushed g_pc
+									LDI 0 PHS JPS MathExpr PLS
+									LDI 'i' STS 5 LDA intA+0 STS 4 LDA intA+1 STS 3
+									RTS
+
+	exprarray:		LDI 3 SBB 0xffff LDI 0 PHS										; push empty array expr with "no_use"
+		exprarrgo:	JPS ArrayExpr
+								PLS  PLS STS 5  PLS STS 5  PLS STS 5
+								RTS
+
+; --------------------------------------------------------------------------------------
+; MATH LIBRARY
+; --------------------------------------------------------------------------------------
+
+int_AtoB:       LDA intA+0 STA intB+0 LDA intA+1 STA intB+1 RTS
+
+int_add:				LDA intB+0 ADW intA+0 LDA intB+1 ADB intA+1	RTS
+
+int_sub:        LDA intB+0 SBW intA+0 LDA intB+1 SBB intA+1 RTS
+
+int_mul:				LDA intA+0 STA intC+0 LDA intA+1 STA intC+1		; copy A factor into C (C will be shifted right)
+								CLW intA
+								LDI 16 STA intcount
+  multloop:			LDA intC+1 ROR STA intC+1			; shift C one step right
+								LDA intC+0 ROR STA intC+0			; lowest bit is now in carry flag
+								BCC multbitoff
+									JPS int_add										; adds current B to accumulator A
+  multbitoff:		LDA intB+0 LSL STA intB+0			; increase the value of B with shift left one step left
+								LDA intB+1 ROL STA intB+1
+								DEB intcount
+								BNE multloop
+									RTS
+
+int_div:				CLB intflag											; clear the sign byte
+								LDA intA+1 CPI 0 BPL divanotneg		; make A and B positive, evaluate the sign of result
+									INB intflag NEW intA						; store a sign, negate A									; 
+	divanotneg:		LDA intB+1 CPI 0 BPL divbnotneg
+									INB intflag NEW intB						; store a(nother) sign, negate B
+	divbnotneg:		LDA intB+0 STA intB+1 CLB intB+0	; move the lower half of B to upper half, clear lower half
+								CLW intD													; clear result E
+								LDI 8 STA intcount								; pre-init the shiftcounter (needs modification below)
+	divup:				LDA intB+1 LSL BMI divloop				; ist oberstes bit vom B schon 'ganz oben'?
+									STA intB+1 INB intcount JPA divup ; increase number of shifts and shift upper B one step up									
+	divloop:			LDA intA+0 STA intC+0 LDA intA+1 STA intC+1		; copy A to C
+								LDA intB+0 SBW intA+0 BCC divcarry0 LDA intB+1 SBB intA+1 BCS divresult		; A = A - B (B fits in A => shift '1' into E)
+	divcarry0:			LDA intC+0 STA intA+0 LDA intC+1 STA intA+1	; restore A from C (B does not fit in A => shift '0' into E)
+	divresult:		LDA intD+0 ROL STA intD+0					; E = E<<1 | C (1: B fit in A, 0: B does not fit into A)
+								LDA intD+1 ROL STA intD+1
+								LDA intB+1 LSR STA intB+1					; shift B one step down
+								LDA intB+0 ROR STA intB+0
+								DEB intcount BCS divloop
+									LDA intD+0 STA intA+0						; move result back into A
+									LDA intD+1 STA intA+1
+									LDA intflag LSR BCC divallnotneg
+										NEW intA
+	divallnotneg:		RTS
+
+int_and:        LDA intB+0 STA intC+0 LDA intB+1 STA intC+1		; copy A to C
+								LDI 16 STA intcount
+  intandloop:   LDA intC+0 LSL STA intC+0         ; shift upper bit of b into carry
+								LDA intC+1 ROL STA intC+1
+              	LDA intA+1 BCC rollandin
+                	CPI 0 BMI rollandin      				; check bit 7 of A, branch if N=1 (C will be 1, too)
+                  	CLC               						; clear C so it will be shifted back in
+  rollandin: 		LDA intA+0 ROL STA intA+0         ; roll C back into A
+								LDA intA+1 ROL STA intA+1
+              	DEB intcount BNE intandloop
+                	RTS
+
+int_or:         LDA intB+0 STA intC+0 LDA intB+1 STA intC+1		; copy A to C
+								LDI 16 STA intcount
+  intorloop:   LDA intC+0 LSL STA intC+0         ; shift upper bit of b into carry
+								LDA intC+1 ROL STA intC+1
+              	LDA intA+1 BCS rollorin
+                	CPI 0 BMI rollorin      				; check bit 7 of A, branch if N=0 (C will be 1)
+                  	CLC               						; clear C so it will be shifted back in
+  rollorin: 		LDA intA+0 ROL STA intA+0         ; roll C back into A
+								LDA intA+1 ROL STA intA+1
+              	DEB intcount BNE intorloop
+                	RTS
+
+int_xor:        LDA intB+0 STA intC+0 LDA intB+1 STA intC+1		; copy A to C
+								LDI 16 STA intcount
+  intxorloop:   LDA intC+0 LSL STA intC+0         ; shift upper bit of b into carry
+								LDA intC+1 ROL STA intC+1
+              	LDA intA+1 BCC xorbupper0					; upper b bit (in carry) is zero
+                	CPI 0 BPL rollxorin      				; check bit 7 of A, branch if N=0 (C will be 1)
+                  	JPA intxorclc
+  xorbupper0:     CPI 0 BMI rollxorin      				; check bit a, branch if N=1 (C will be 1 after CPI 0)
+  intxorclc:   	  	CLC										
+  rollxorin: 		LDA intA+0 ROL STA intA+0         ; roll C back into A
+								LDA intA+1 ROL STA intA+1
+              	DEB intcount BNE intxorloop
+                	RTS
+
+int_lsl:  			LDA intB+0 CPI 0 BPL intlslpos
+									NEG JPA intlsrpos
+	intlslpos:		STA intcount
+	intlslloop:		DEB intcount BCC intlsldone
+									LDA intA+0 LSL STA intA+0 LDA intA+1 ROL STA intA+1 JPA intlslloop
+	intlsldone:		RTS
+
+int_lsr:  			LDA intB+0 CPI 0 BPL intlsrpos
+									NEG JPA intlslpos
+	intlsrpos:		STA intcount
+	intlsrloop:		DEB intcount BCC intlsrdone
+									LDA intA+1 LSR STA intA+1 LDA intA+0 ROR STA intA+0 JPA intlsrloop
+	intlsrdone:		RTS
+
+int_print:			LDA intA+0 STA intC+0								; PRINT A 16-BIT REGISTER AS DEC NUMBER
+								LDA intA+1 STA intC+1								; copy A to working reg C so A remains unchanged
+                ROL BCC int_notneg
+									NEW intC LDI '-' OUT							; negative sign
+	int_notneg:		LDI 0 PHS														; push endmarker onto stack
+	int_start:		CLB intC+2 	                    		; clear upper register and carry store
+                LDI 16 STA intcount
+	int_shift:		LDA intC+2 ROL		  								; activate C stored in bit 7 (initially = 0)
+								LDA intC+0 ROL STA intC+0			  		; shift C back in and shift everything one step left
+								LDA intC+1 ROL STA intC+1
+								LDA intC+2 ROL STA intC+2
+								CPI 10 BCC int_done									; 10 did not fit in => do not set bit 7 as "carry"
+									ADI 118 STA intC+2			        	; 10 went into it => subtract 10 and set bit 7 as "carry" (-10 +128)
+	int_done:		  DEB intcount BNE int_shift
+									LDA intC+2 LSL LSR ADI '0' PHS		; erase a possible stored carry and push remainder as char on stack
+									LDA intC+2 ROL			  						; restore stored carry flag
+									LDA intC+0 ROL STA intC+0		  		; shift in C and shift everything one step up
+									LDA intC+1 ROL STA intC+1
+									LDA intC+2 ROL STA intC+2		  		; shift C into 'remember' and shift an old carry out
+                  LDI 0 CPA intC+0 BNE int_start    ; prüfe nach, ob big register null enthält
+									  CPA intC+1 BNE int_start
+	int_stack:					PLS CPI 0 BEQ int_out					; read the numbers from the stack backwards (0 = end)
+										  OUT CLC NOP NOP NOP
+											NOP NOP NOP NOP NOP						; print (optimized)
+										  JPA int_stack
+	int_out:					RTS
+
+; --------------------------------------------------------------------------------------
+; INSTRUCTIONS
+; --------------------------------------------------------------------------------------
+
+DoPrint:				LDI 3 SBB 0xffff JPS Expr
+								PLS STA intA+1 PLS STA intA+0				; extract val/ptr of expression, intA = pointer to array data
+								PLS LSL LSR CPI 'C' BNE dopr2				; PRINT char[] TYPE
+									LDR intA STA arranz+0 INW intA		; extract number of elements
+									LDR intA STA arranz+1 INW intA
+	doprcloop:			DEW arranz BCC doprcomma					; count number of elements to print
+										LDR intA OUT INW intA
+										NOP NOP NOP NOP NOP NOP NOP JPA doprcloop
+	dopr2:				CPI 'I' BNE doprintint															; PRINT int[] -> intA = pointer to array data
+									LDI '[' OUT
+									LDA intA+0 STA arrptr+0 LDA intA+1 STA arrptr+1		; move intA to arrptr since intA is used
+									LDR arrptr STA arranz+0 INW arrptr								; extract number of elements
+									LDR arrptr STA arranz+1 INW arrptr									
+									DEW arranz BCC dopriclose													; count number of elements to print
+	dopriloop:			LDR arrptr STA intA+0 INW arrptr
+									LDR arrptr STA intA+1 INW arrptr
+									JPS int_print
+									DEW arranz BCC dopriclose
+										LDI ',' OUT JPA dopriloop
+	dopriclose:			LDI ']' OUT JPA doprcomma
+	doprintint:		JPS int_print
+	doprcomma:		LDI ',' PHS JPS Grab PLS CPI 1 BEQ DoPrint
+									RTS
+
+DoBreak:				LDA g_loop CPI 0 BNE dobrokay
+									LDI 14 JPA Error
+	dobrokay:			LDI 1 STA g_halt
+								LDA g_outind PHS JPS SkipToIndent PLS
+								RTS
+
+DoReturn:				LDA g_sub CPI 0 BNE doretokay
+									LDI 15 JPA Error
+	doretokay:		PHS JPS Next PLS CPI 10 BEQ doretnone
+									LDI 3 SBB 0xffff JPS Expr
+									PLS STA g_retptr+1 PLS STA g_retptr+0 PLS STA g_rettyp
+	doretnone:		LDI 1 STA g_halt
+								LDI 0 PHS JPS SkipToIndent PLS
+								RTS
+
+DoAssign:				LDI '[' PHS JPS Grab PLS CPI 0 BEQ doasnorm									
+									LDI 3 SBB 0xffff JPS getVarRef								; get the reference
+									PLS STA assptr+1 PLS STA assptr+0				; save pointer, type still on stack
+
+									LDI 0 PHS JPS MathExpr PLS							; get element index
+									LDA intA+0 PHS LDA intA+1 PHS						; push element index
+									LDI ']' PHS JPS Assert PLS
+									LDI '=' PHS JPS Assert PLS
+
+									LDS 3 LSL LSL LSL BCC doasisarray
+										LDI 9 JPA Error												; expecting array
+	doasisarray:		LDR assptr STA assanz+0 INW assptr			; assanz contains number of elements
+									LDR assptr STA assanz+1 INW assptr			; assptr now points to DATA SECTION
+									LDS 1 CPI 0 BPL doasnotneg							; check for neg index
+	doaselbad:				LDI 21 JPA Error											; invalid index
+	doasnotneg:			LDA assanz+1 SBB intA+1 BCC doaselokay
+										LDA assanz+0 SBW intA BCS doaselbad
+	doaselokay:			LDI 0 PHS JPS MathExpr PLS
+									LDS 1 ADB assptr+1 LDS 2 ADW assptr
+									LDS 3 LSL LSR CPI 'C' BNE doasint
+										LDA intA+0 STR assptr
+										JPA doasret
+	doasint:				LDS 1 ADB assptr+1 LDS 2 ADW assptr			; add a second time
+									LDA intA+0 STR assptr INW assptr LDA intA+1 STR assptr
+	doasret:				LDI 3 ADB 0xffff RTS													; clean up type and index
+
+	doasnorm:			LDI '=' PHS JPS Assert PLS
+	doaspushloop:	LDR strptr PHS DEW strptr DEB takecount BCS doaspushloop		; store parsed "name" on stack
+									LDI 4 SBB 0xffff JPS Expr
+									LDA g_sub STS 4 JPS storeVar LDI 4 ADB 0xffff
+	doaspullloop:	PLS CPI 0 BNE doaspullloop																	; remove "name" from stack
+									RTS
+
+	assptr:				0x0000
+	assanz:				0x0000
+
+; push: callpc_lsb, callpc_msb
+; pull: #, #
+DoCall:					LDI '(' PHS JPS Assert PLS
+								LDA g_pc+0 STA callarg+0 LDA g_pc+1 STA callarg+1								; pc -> arg after (
+								LDS 3 STA callpar+1 STA g_pc+1 LDS 4 STA callpar+0 STA g_pc+0		; callpc -> pc, par
+								CLB callisref LDA usedvars PHS															; push usedvars
+								LDA g_tind PHS LDI -1 STA g_tind														; push target indentation and invalidate to prevent creation of parameters as globals
+
+	callloop:			LDI ')' PHS JPS Grab PLS CPI 1 BEQ callstart										; parse parameters
+									LDR g_pc CPI '&' BNE callnoref
+										INW g_pc LDI 1 STA callisref
+		callnoref:		PHS JPS Next PLS JPS TakeAlNum
+									LDA name CPI 0 BNE callpushloop	
+										LDI 17 JPA Error								; invalid parameter
+
+	callpushloop:	LDR strptr PHS DEW strptr DEB takecount BCS callpushloop		; store parsed "name" on stack
+									LDI ',' PHS JPS Grab PLS
+									LDA g_pc+0 STA callpar+0 LDA g_pc+1 STA callpar+1
+									LDA callarg+0 STA g_pc+0 LDA callarg+1 STA g_pc+1
+									LDA callisref CPI 0 BEQ callelref
+										CLB callisref
+										PHS JPS Next PLS
+										JPS TakeAlNum
+										LDI 4 SBB 0xffff JPS getVarRef
+										JPA callreuse
+
+		callelref:		LDI 4 SBB 0xffff JPS Expr
+		callreuse:		LDA g_sub INC STS 4
+									JPS storeVar LDI 4 ADB 0xffff
+	callpullloop:		PLS CPI 0 BNE callpullloop																	; remove "name" from stack
+
+		callendif:		LDI ',' PHS JPS Grab PLS
+									LDA g_pc+0 STA callarg+0 LDA g_pc+1 STA callarg+1
+									LDA callpar+0 STA g_pc+0 LDA callpar+1 STA g_pc+1
+									JPA callloop
+
+	callstart:		LDA callarg+0 PHS LDA callarg+1 PHS														; push arg
+								LDA g_loop PHS
+								CLB g_loop INB g_sub CLB g_tind
+								JPS Block
+								PLS STA g_loop
+								DEB g_sub
+								PLS STA g_pc+1 PLS STA g_pc+0																	; pull arg
+								CLB g_halt LDI ')' PHS JPS Assert PLS
+								PLS STA g_tind
+								JPS resizeVar PLS
+								RTS
+
+	callarg:			0x0000
+	callpar:			0x0000
+	callisref:		0x00
+
+DoDef:					LDA g_mind CPI 0 BEQ dodefindok
+									LDI 16 JPA Error
+	dodefindok:		PHS JPS Next PLS
+								JPS TakeAlNum LDI '(' PHS JPS Assert PLS
+								JPS storeCall 														; unnötig LDI ')' PHS JPS TakeUntil PLS
+								LDI 0 PHS JPS SkipToIndent PLS
+								RTS
+
+DoIf:						PHS																				; clean up later
+								JPS BooleanExpr LDS 1 CPI 0 BEQ doifskip
+									JPS Block JPA doifgrab
+	doifskip:			LDA g_tind PHS JPS SkipToIndent PLS
+	doifgrab:			LDI 10 PHS JPS Grab PLS DEC BCS doifgrab
+
+	doifwhile:		LDA g_mind CPA g_tind BNE doifelse
+									LDI <elifstr PHS LDI >elifstr PHS JPS TakeThis PLS PLS CPI 1 BNE doifelse
+										
+										LDS 1 CPI 1 BNE doif2
+		doif2reuse:				LDA g_tind PHS JPS SkipToIndent PLS JPA doifgrab2
+		doif2:					JPS BooleanExpr LDS 1 CPI 1 BNE doif2reuse
+											JPS Block JPA doifgrab2
+		doifgrab2:	LDI 10 PHS JPS Grab PLS DEC BCS doifgrab2
+										JPA doifwhile
+
+	doifelse:			LDA g_mind CPA g_tind BNE doifret
+									LDI <elsestr PHS LDI >elsestr PHS JPS TakeThis PLS PLS CPI 1 BNE doifret
+										LDS 1 CPI 1 BEQ doifskip2
+											JPS Block JPA doifret
+	doifskip2:				LDA g_tind PHS JPS SkipToIndent PLS
+	doifret:			PLS
+								RTS
+
+	elifstr:			'elif', 0
+	elsestr:			'else', 0
+
+DoWhile:				INB g_loop
+								LDA g_pc+0 PHS LDA g_pc+1 PHS
+								LDA g_outind PHS LDA g_tind STA g_outind
+								PHS																	; push container for BooleanExpr
+	dowloop:			JPS BooleanExpr LDS 1 CPI 0 BEQ dowskip
+									JPS Block
+									LDA g_halt CPI 1 BEQ dowbreak
+									LDS 4 STA g_pc+0 LDS 3 STA g_pc+1
+									JPA dowloop
+	dowskip:			LDA g_outind PHS JPS SkipToIndent PLS
+	dowbreak:			PLS PLS STA g_outind PLS PLS				; clean up BooleanExpr, g_outind and g_pc
+								DEB g_loop CLB g_halt
+								RTS
+
+DoInclude:			LDA g_mind CPI 0 BEQ doincokay
+									LDI 18 JPA Error												; unexpected include
+	doincokay:		LDI '"' PHS JPS Assert PLS
+								LDI <_InpBuf STA strptr+0 LDI >_InpBuf STA strptr+1
+								LDI 19 STA inccount
+	doincloop:		LDR g_pc CPI '"' BEQ doincend
+									STR strptr INW strptr INW g_pc DEB inccount BCS doincloop
+										LDI 20 JPA Error
+	doincend:			INW g_pc LDA g_pc+0 PHS LDA g_pc+1 PHS		; push current pc after ".."
+								LDI 0 STR strptr													; add zero-termination
+								LDI <_InpBuf PHS LDI >_InpBuf PHS
+								JPS _FindFile
+								PLS STA g_pc+1 CPI 0x80 BCC doincfound
+									PLS PLS STA g_pc+1 PLS STA g_pc+0				; clean up for proper error line calc
+									LDI 19 JPA Error												; file not found
+	doincfound:		PLS STA g_pc+0
+								LDI 24 ADW g_pc														; skip over file header
+								CLB g_mind LDI 1 STA g_cnt
+								JPS Program
+								PLS STA g_pc+1 PLS STA g_pc+0							; pull old pc back to after ".."
+								RTS
+	
+	inccount:			0x00
+
+; --------------------------------------------------------------------------------------
+; LANGUAGE STRUCTURE
+; --------------------------------------------------------------------------------------
+
+Simple_Stmt:		JPS TakeAlNum
+								LDI <printstr PHS LDI >printstr PHS LDI <name PHS LDI >name PHS
+								JPS strcmp LDI 3 ADB 0xffff PLS CPI 0 BEQ simpleprint
+									LDI <breakstr PHS LDI >breakstr PHS LDI 2 SBB 0xffff 					;	LDI <name PHS LDI >name PHS
+									JPS strcmp LDI 3 ADB 0xffff PLS CPI 0 BEQ simplebreak
+										LDI <returnstr PHS LDI >returnstr PHS LDI 2 SBB 0xffff			; LDI <name PHS LDI >name PHS
+										JPS strcmp LDI 3 ADB 0xffff PLS CPI 0 BEQ simplereturn
+								PHS PHS JPS getCall
+								LDS 1 CPI 0 BNE simplecall LDS 2 CPI 0 BEQ simpleassign
+	simplecall:			JPS DoCall PLS PLS RTS
+	simpleassign:	PLS PLS JPS DoAssign RTS
+	simpleprint:	JPS DoPrint	RTS
+	simplebreak:	JPS DoBreak RTS
+	simplereturn:	JPS DoReturn RTS
+
+	printstr:			'print', 0
+	breakstr:			'break', 0
+	returnstr:		'return', 0
+
+Simple_Stmts:		LDA g_halt CPI 1 BEQ simplesexit
+									PHS JPS Next PLS CPI 10 BEQ simplesexit
+										LDR g_pc CPI 0 BEQ simplesexit
+											JPS Simple_Stmt JPA Simple_Stmts
+	simplesexit:	RTS
+
+; push: num, 0: if, 1: while, 2: def, no other number possible
+; pull: #
+Compound_Stmt:	LDS 3 DEC BCC compif
+									DEC BCC compwhile
+										DEC BCC compdef
+											JPS DoInclude RTS						
+	compdef:			JPS DoDef RTS
+	compif:				JPS DoIf RTS
+	compwhile:		JPS DoWhile RTS
+
+; push: #
+; pull: bool
+Statement:			LDI 10 PHS JPS Grab PLS CPI 1 BEQ Statement
+								LDA g_mind CPA g_tind BNE statefalse
+								LDA g_pc+0 PHS LDA g_pc+1 PHS				; push PC
+								JPS TakeAlNum
+								LDI <ifstr PHS LDI >ifstr PHS LDI <name PHS LDI >name PHS
+								JPS strcmp LDI 3 ADB 0xffff PLS CPI 0 BEQ statecomp						; if = 0
+									LDI <whilestr PHS LDI >whilestr PHS LDI 2 SBB 0xffff 				; LDI <name PHS LDI >name PHS
+									JPS strcmp LDI 3 ADB 0xffff PLS CPI 0 BNE statedef
+										LDI 1 JPA statecomp																				; while = 1
+	statedef:				LDI <defstr PHS LDI >defstr PHS LDI 2 SBB 0xffff						; LDI <name PHS LDI >name PHS
+									JPS strcmp LDI 3 ADB 0xffff PLS CPI 0 BNE stateinclude
+										LDI 2 JPA statecomp																				; def = 2
+	stateinclude:		LDI <includestr PHS LDI >includestr PHS LDI 2 SBB 0xffff		; LDI <name PHS LDI >name PHS
+									JPS strcmp LDI 3 ADB 0xffff PLS CPI 0 BNE statesimple
+										LDI 3																											; include = 3
+	statecomp:		PHS JPS Compound_Stmt PLS												; send number of compound statement
+								PLS PLS JPA statetrue														; clean up PC from stack
+	statesimple:	PLS STA g_pc+1 PLS STA g_pc+0 JPS Simple_Stmts	; use PC from stack
+	statetrue:		LDI 1 STS 3 RTS
+	statefalse:		LDI 0 STS 3 RTS
+
+	ifstr:				'if', 0
+	whilestr:			'while', 0
+	defstr:				'def', 0
+	includestr:		'include', 0
+		
+Block:					LDA usedvars PHS
+								PHS JPS Next PLS CPI 10 BNE blockelse
+									LDI 2 ADB g_tind
+									PHS JPS Statement PLS CPI 0 BNE blockwhile
+										LDI 12 JPA Error
+	blockwhile:			PHS JPS Look PLS CPI 0 BEQ blockraus
+									PHS JPS Statement PLS CPI 0 BNE blockwhile
+	blockraus:				LDI 2 SBB g_tind JPA blockend
+	blockelse:		JPS Simple_Stmts
+	blockend:			JPS resizeVar PLS
+								RTS
+
+Program:				PHS JPS Look PLS CPI 0 BEQ progend
+									PHS JPS Statement PLS CPI 1 BEQ Program
+										LDI 11 JPA Error
+	progend:			RTS
+
+; --------------------------------------------------------------------------------------
+; GLOBAL STATE (64 BYTES)
+; --------------------------------------------------------------------------------------
+
+#end
+
+#org 0x9000     file:         ; beginning of the data file
+#org 0xe000     varmem: 	    ; variable dictionary (59 entries), stride 20 = 15(name) + 1(sub) + 1(0) + 1(type) + 2(index)
+#org 0xe4a0			callmem:			; call dictionary (40 entries) bis 0xe7bf
+#org 0xe800			datamem:			; 1KB = 0x0400 bytes
+#org 0xec00			buffer:				; 1KB = 0x0400 bytes
+#org 0xe7c0										; MIN global state (64 bytes)
+name:						'123451234512345', 0			; buffer for parsing a variablename/callname
+subname:				'123451234512345', '@', 0	; buffer for parsing a variablename/callname
+g_pc:						0x0000
+g_halt:					0
+g_sub:					0
+g_loop:					0
+g_mind:					0
+g_tind:					0
+g_cnt:					0
+g_outind:				0
+g_rettyp:				0
+g_retptr:				0x0000
+usedcalls:			0
+usedvars:				0
+useddata:				0x0000
+bufptr:					0x0000
+strptr:					0x0000				; points at MIN's strings (varnames, callnames, takethis, takealnum, etc.)
+
+intA:				    0x0000	      ; MATH REGISTERS
+intB:				    0x0000
+intC:				    0x0000, 0			; used as modifiable copy
+intD:				    0x0000				; only used by div
+intcount:	  	  0
+intflag:		  	0
+
+#org 0xf003     _Prompt:      ; OS entry point for line input prompt
+#org 0xf006     _Print:       ; Prints a null-terminated string
+#org 0xf009     _PrintHex:    ; Prints a byte in HEX format
+#org 0xf00c     _WaitUART:    ; Waits for UART transmission
+#org 0xf015     _MemMove:     ; Moves N bytes from A.. to C..
+#org 0xf028     _Random:      ; Returns a pseudo-random byte number
+#org 0xf018     _FindFile:    ; Returns a pointer to a stored file
+#org 0xfec9     _InpBuf:			; 55 bytes of OS input buffer
+
+#begin
+#org 0xc000
+
+; --------------------------------------------------------------------------------------
+; INFORMATION
+; --------------------------------------------------------------------------------------
+
+; MEMORY LAYOUT:
+; 0x8000 - 0x8fff		4KB text editor
+; 0x9000 - 0xbfff		12kB MIN source file
+; 0xc000 - 0xdfff		8KB MIN interpreter
+; 0xe000 - 0xe49f		var dict (59 entries = 1180), stride 20 = 15(name) + 1(subinfo) + 1(0) + 1(type) + 2(index)
+; 0xe4a0 - 0xe7bf		call dict (40 entries = 800 bytes)
+; 0xe7c0 - 0xe7ff		MIN global state (64 bytes)
+; 0xe800 - 0xebff		1KB data memory
+; 0xec00 - 0xefff		1KB buffer memory
+; 0xf000 - 0xffff		OS data and stack
+
+; NUM	ERROR DESCRIPTION
+; 0		unexpected end of file
+; 1		invalid identifier
+; 2		call dictionary full
+; 3		call already exits
+; 4		undefined variable
+; 5		invalid expression
+; 6		type mismatch
+; 7		data memory full
+; 8		variable dictionary full
+; 9		expecting array
+; 10 	expecting basetype
+; 11	unexpected indentation
+; 12	unexpected end of block
+; 13	array buffer overflow
+; 14	unexpected break
+; 15	unexpected return
+; 16	unexpected definition
+; 17	invalid parameter
+; 18	unexpected include
+; 19	file not found
+; 20	invalid filename
+; 21  invalid index
+; 22	element access without array
+; 34  expecting "
+; 40  expecting (
+; 41	expecting )
+; 44  expecting '
+; 46  expecting .
+; 61  expecting =
+; 93  expecting ]
+
+; Copyright 2022 Carsten Herting (slu4)
+
+; LICENSING INFORMATION
+; This file is part of MIN. MIN is free software: you can redistribute it and/or modify it under
+; the terms of the GNU General Public License as published by the Free Software Foundation, either
+; version 3 of the License, or (at your option) any later version.
+; MIN is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+; implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public
+; License for more details. You should have received a copy of the GNU General Public License along
+; with this program. If not, see https://www.gnu.org/licenses/.

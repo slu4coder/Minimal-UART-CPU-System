@@ -1,0 +1,17 @@
+def add_one(& s)     # try to pass without &
+  s = s + 1
+  return s
+
+def add_hi(& s)  # try to pass without &
+  s = s + " Hi!"
+  return s
+
+z = 0
+a = "Hallo"
+
+print z, a, "\n"
+
+add_hi(a)
+add_one(z)
+
+print z, a, "\n"

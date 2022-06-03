@@ -1,0 +1,12 @@
+def test()
+  y = 100               # local variable
+  print x               # global variable
+
+x = 1                   # global variable
+if x == 1
+  y = 0                 # local variable
+  while y<10
+    y = y+1
+    a = 10              # local variable
+    test()
+    print y

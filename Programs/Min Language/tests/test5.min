@@ -1,0 +1,7 @@
+def square(zahl)
+  return zahl * zahl
+
+x=1
+while x <= 256
+  print x, ":", square(x), " "
+  x=x+1

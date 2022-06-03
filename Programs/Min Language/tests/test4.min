@@ -1,0 +1,11 @@
+def test()
+  print "global inside test():", a, "\n"
+  a = "slu4"
+  print "global changed inside test():", a, "\n"
+
+print "GLOBAL TEST\n"
+a = "Hello"
+print "global: ", a, "\n"
+
+test()
+print "global:", a, "\n"

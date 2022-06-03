@@ -1,0 +1,47 @@
+include "std.min"
+
+def print_demo()      # demonstrating the print statement and mathmatical terms
+  print "\# MATH DEMO (10+20)*3 + 1 = ", (10+20)*3 + 1, "\n"
+
+def whiledemo()      # demonstrating the while, break and if statements
+  print "\# WHILE DEMO\n"
+  a=0
+  while a<20
+    if not a<10 break
+    print "a=", a, ""
+    b=0
+    while b<((2+3)*a) print "." b=b+1
+    if a<5 print "a<5\n"
+    else print "a>=5\n"
+    a=a+1
+
+def logicdemo()
+  print "\# LOGIC DEMO "
+  if 0 or 0>-1 or 0 or 0 print "True! "
+  else print "False! "
+  if 1 and 1 and 1 and 1 print "True!\n"
+  else print "False!\n"
+
+def inputdemo()
+  print "\# INPUT DEMO "
+  while 1
+    print "Type in a number > 0 "
+    i = input()
+    num = int(i)
+    if num > 0
+      a = 0
+      while a<num
+        print "."
+        a = a + 1
+      print "\n"
+    else
+      print "Bye!\n" break
+
+def main()     		# main subroutine calling other subroutines
+  print_demo()
+  whiledemo()
+  logicdemo()
+  inputdemo( )
+
+print "\# START\n"
+main()          # executes the subroutine 'main'

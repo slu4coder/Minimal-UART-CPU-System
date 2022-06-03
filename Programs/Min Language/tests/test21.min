@@ -1,0 +1,4 @@
+a = 0x101
+print "a=", a, "\n"
+b = a & 0xff
+print "b=", b, "\n"
