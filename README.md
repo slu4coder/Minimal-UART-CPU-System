@@ -1,8 +1,12 @@
-# Minimal UART CPU System - Revision 1.5 Out Now!
+# Minimal UART CPU System - Breadboard REDUX Revision 1.6 Out Now!
 
-NEWS: 'Minimal VGA Extension Card' released! https://github.com/slu4coder/DIY-VideoRAM/tree/main/KiCAD
+NEW: Build your own 'Minimal CPU System' on breadboards: https://www.youtube.com/watch?v=Gz1VVOsNn_8
 
-NEWS: 'Minimal CPU System' Emulator released! See user manual chapter 'Minimal Emulator' for details.
+NEW: Python-like high-level programming language MIN released: https://www.youtube.com/watch?v=H342TwW4R7k
+
+NEW: 'Minimal VGA Extension Card' released! https://github.com/slu4coder/DIY-VideoRAM/tree/main/KiCAD
+
+NEW: 'Minimal CPU System' Emulator released! See user manual chapter 'Minimal Emulator' for details.
 
 ● Native assembler and text editor released!
 
