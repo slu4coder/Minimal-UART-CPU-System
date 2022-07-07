@@ -1,12 +1,10 @@
                #org 0xc000
-; **********************************************
-; *****                                    *****
-; *****    MINIMAL BLOCKS by slu4 (2021)   *****
-; *****                                    *****
-; *****       last update 03.06.2021       *****
-; *****            ROM Version             *****
-; *****                                    *****
-; **********************************************
+; **************************************
+; *****                            *****
+; *****   Minimal BLOCKS by slu4   *****
+; *****   last update 07.07.2022   *****
+; *****                            *****
+; **************************************
               LDI 0xfe STA 0xffff           ; init stack
 game_restart: CLB state
               JPS PrintIntro
@@ -15,7 +13,7 @@ game_loop:    LDI 27 OUT JPS _WaitUART      ; hide cursor
               LDI '[' OUT JPS _WaitUART
               LDI 'H' OUT JPS _WaitUART
               JPS Sleep                     ; refresh 1/60s
-              JPS Randomize
+              INB _RandomX                  ; randomize
               LDA state DEC BCC state_intro ; switching states
                 DEC BCC state_run
                   JPA state_over
@@ -34,7 +32,7 @@ state_intro:  INP CPI 32               ; non-blocking key input
                   LDI 80 STA waiting   ; fall timer init
                   CLB dropsteps
                   JPS PrintFrame       ; print empty field
-                  JPS NewShape         ; pick random shape to start with (no test required)
+                  JPS NewShape         ; pick new shape to start with (no test required)
                   LDI '#' STA shapechar JPS PrintShape       ; draw tetromino
                   LDI <scoretext PHS
                   LDI >scoretext PHS
@@ -73,12 +71,12 @@ state_run:    INW gameframes           ; count time
               LDA xpos DEC PHS LDA ypos PHS JPS TestShape PLS
               PLS SBB xpos
               JPA r_drshape
-  d_key:      JPS Randomize JPS Randomize
+  d_key:      INB _RandomA
               LDI '.' STA shapechar JPS PrintShape
               LDA xpos INC PHS LDA ypos PHS JPS TestShape PLS
               PLS ADB xpos
               JPA r_drshape
-  w_key:      JPS Randomize JPS Randomize JPS Randomize
+  w_key:      INB _RandomB
               LDI '.' STA shapechar JPS PrintShape  ; delete old shape
               JPS RotateShape                       ; make rotate shape
               LDA xpos PHS LDA ypos PHS JPS TestShape PLS PLS DEC BCS r_drshape                  ; test position
@@ -92,7 +90,7 @@ state_run:    INW gameframes           ; count time
                 JPS RotateShape
                 JPS RotateShape
                 JPA r_drshape
-  s_key:      JPS Randomize
+  s_key:      INB _RandomC
               INB dropsteps
               LDI -1 STA waiting
               JPA game_loop
@@ -163,7 +161,7 @@ state_run:    INW gameframes           ; count time
                       LDA score+1 STA highscore+1
 
   rpnewshape:   CLB dropsteps
-                JPS NewShape            ; pick random shape
+                JPS NewShape            ; pick a new shape
                 JPS PrintField          ; draw field
                 JPS PrintShape          ; Tetromino malen
                 LDA xpos PHS LDA ypos PHS JPS TestShape PLS
@@ -180,7 +178,8 @@ NewShape:     LDI <shape STA ptr2+0    ; copy a random piece into shape
               LDI >shape STA ptr2+1
               LDI <minos STA ptr+0
               LDI >minos STA ptr+1
-              LDA randomnum LSL LSL LSL ADA randomnum   ; x 9
+  rndagain:   PHS JPS _Random PLS LSR LSR LSR LSR LSR CPI 7 BCS rndagain
+              STA vari LSL LSL LSL ADA vari   ; x 9
               ADW ptr
               LDI 8 STA vari
   nscopyloop: LDR ptr STR ptr2
@@ -297,11 +296,6 @@ PrintSpace:   LDI <spacetext PHS
               JPS _Print PLS PLS
               RTS
 
-Randomize:    INB randomnum     ; Randomize with time
-              CPI 7 BCC randrts
-                CLB randomnum   ; overflow
-  randrts:    RTS
-
 Sleep:        CLB ptr+0 LDI 0x04 STA ptr+1    ; count down a 16-bit word
   sloop:      DEW ptr BCS sloop
                 RTS
@@ -387,7 +381,6 @@ yoff:         0
 state:        0          ; 0: intro, 1: running, 2: over
 score:        0x0000     ; holding the current score
 waiting:      0          ; timer
-randomnum:    0          ; Random number generator
 gameframes:   0x0000     ; counting the game frames
 xpos:         0          ; current position of tetromino
 ypos:         0
@@ -407,3 +400,8 @@ rowfull:      0          ; boolean line completed
 #org 0xf00c   _WaitUART: ; Waits for UART transmission
 #org 0xf022   _CursorX:  ; set the cursor x position 1..60
 #org 0xf025   _CursorY:  ; set the cursor y position 1..25
+#org 0xf028   _Random:   ; returns a pseudo-random byte number
+#org 0xfec2   _RandomX:  ; Pseudo-random number generator state
+#org 0xfec3   _RandomA:
+#org 0xfec4   _RandomB:
+#org 0xfec5   _RandomC:
