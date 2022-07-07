@@ -1,6 +1,6 @@
-# Minimal UART CPU System - 1.6 Redux Beast Mode Upcoming!
+# Minimal UART CPU System - 1.6 'Redux Beast Mode' Upcoming Soon!
 
-NEW: Minimal CPU 1.6 Redux is now running at up to 8.3MHz. New video upcoming!
+NEW: Minimal CPU 1.6 'Redux' is now running in beast mode at up to 8.3MHz. New video upcoming soon!
 
 ● Build your own 'Minimal CPU System' on breadboards: https://www.youtube.com/watch?v=Gz1VVOsNn_8
 
