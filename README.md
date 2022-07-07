@@ -43,7 +43,7 @@ WHAT YOU GET:
 
 TECHNICAL SPECIFICATION:
   
-  ● Processing power (approx. 1.1Mips @8.3MHz) comparable to 2.2 x Commodore 64 or Apple II
+  ● Processing power (1.0Mips @8.3MHz) comparable to 2.3 x Commodore 64 or Apple II
   
   ● Clear(est?) and simple(st? – you judge!) design for fun and education
   
