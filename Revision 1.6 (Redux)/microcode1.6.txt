@@ -1,41 +1,9 @@
-// MINIMAL UART CPU SYSTEM Microcode 1.6 'Redux' June 21th 2022 by Carsten Herting (slu4)
-// Software-compatible with Microcode 1.5 'Expanded' January 26th 2022 by Carsten Herting (slu4)
+// MINIMAL UART CPU SYSTEM Microcode 1.6 'Redux' Jul 6th 2022 by Carsten Herting (slu4)
+// Software written for revision 1.3 - 1.5 will run on revision 1.6 but not vice versa.
 
-#define CTRL_INVERT_MASK  0b101101100111111101010001 // 0: active HIGH, 1: active LOW
-
-#define EO                0b000000000000000000000001 // LSB
-#define ES                0b000000000000000000000010
-#define EC                0b000000000000000000000100
-#define AI                0b000000000000000000001000
-#define AO                0b000000000000000000010000
-#define BI                0b000000000000000000100000
-#define BO                0b000000000000000001000000
-#define II                0b000000000000000010000000
-#define KI                0b000000000000000100000000 // MSB
-#define FI                0b000000000000001000000000
-#define IC                0b000000000000010000000000
-#define CIL               0b000000000000100000000000
-#define CIH               0b000000000001000000000000
-#define COL               0b000000000010000000000000
-#define COH               0b000000000100000000000000
-#define CE                0b000000001000000000000000
-#define ME                0b000000010000000000000000 // HSB
-#define MIL               0b000000100000000000000000
-#define MIH               0b000001000000000000000000
-#define TI                0b000010000000000000000000
-#define TO                0b000100000000000000000000
-#define TC                0b001000000000000000000000
-#define RI                0b010000000000000000000000
-#define RO                0b100000000000000000000000
-
-// flag lines set by ALU
-#define FLAG_Z            0b001                      // zero flag
-#define FLAG_C            0b010                      // carry flag
-#define FLAG_N            0b100                      // negative flag
-
-#define NOP    COL|MIL, COH|MIH, RO|II|CE|ME, 0,     0,              0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-#define BNK    COL|MIL, COH|MIH, RO|II|CE|ME, AO|KI, IC,             0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-#define Out    COL|MIL, COH|MIH, RO|II|CE|ME, AO|TI, IC,             0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+#define NOP    COL|MIL, COH|MIH, RO|II|CE|ME, 0,     0,              0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+#define BNK    COL|MIL, COH|MIH, RO|II|CE|ME, AO|KI, IC,             0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+#define OUT    COL|MIL, COH|MIH, RO|II|CE|ME, AO|TI, IC,             0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 #define CLC    COL|MIL, COH|MIH, RO|II|CE|ME, AO|BI, EO|FI|ES,       IC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 #define SEC    COL|MIL, COH|MIH, RO|II|CE|ME, AO|BI, EO|FI|ES|EC,    IC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 #define LSL    COL|MIL, COH|MIH, RO|II|CE|ME, AO|BI, EO|FI|AI,       IC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
@@ -49,97 +17,77 @@
 #define ASR01x COL|MIL, COH|MIH, RO|II|CE|ME, BI,    EO|FI|EC,       AO|BI,          EO|FI|ES,       EO|FI|EC|AI|BI, EO|FI|EC|AI|BI, EO|FI|EC|AI|BI, EO|FI|EC|AI|BI, EO|FI|EC|AI|BI, EO|FI|EC|AI|BI, EO|FI|EC|AI|BI, EO|FI|EC|AI|BI, IC
 #define ASR10x COL|MIL, COH|MIH, RO|II|CE|ME, BI,    EO|FI|EC,       AO|BI,          EO|FI|ES|EC,    EO|FI|AI|BI,    EO|FI|AI|BI,    EO|FI|AI|BI,    EO|FI|AI|BI,    EO|FI|AI|BI,    EO|FI|AI|BI,    EO|FI|AI|BI,    EO|FI|AI|BI,    IC
 #define ASR11x COL|MIL, COH|MIH, RO|II|CE|ME, BI,    EO|FI|EC,       AO|BI,          EO|FI|ES|EC,    EO|FI|EC|AI|BI, EO|FI|EC|AI|BI, EO|FI|EC|AI|BI, EO|FI|EC|AI|BI, EO|FI|EC|AI|BI, EO|FI|EC|AI|BI, EO|FI|EC|AI|BI, EO|FI|EC|AI|BI, IC
-#define INP0   COL|MIL, COH|MIH, RO|II|CE|ME, BI|FI, TO|AI, 0, 0, 0, 0, TC, EO|ES|EC|FI, IC, 0, 0, 0, 0 // very optimized
-#define INP1   COL|MIL, COH|MIH, RO|II|CE|ME, BI|FI,    AI, 0, 0, 0, 0, 0,  EO|ES|EC|FI, IC, 0, 0, 0, 0 // very optimized
-#define NEG    COL|MIL, COH|MIH, RO|II|CE|ME, AO|BI, EO|FI|ES|EC|AI, EO|FI|ES|EC|AI, IC, 0, 0, 0, 0, 0, 0, 0, 0, 0
-#define Inc    COL|MIL, COH|MIH, RO|II|CE|ME, BI,    EO|FI|ES|EC|AI, IC,             0,  0, 0, 0, 0, 0, 0, 0, 0, 0
-#define Dec    COL|MIL, COH|MIH, RO|II|CE|ME, BI,    EO|FI|AI,       IC,             0,  0, 0, 0, 0, 0, 0, 0, 0, 0
+#define INP0   COL|MIL, COH|MIH, RO|II|CE|ME, BI|FI, TO|AI, 0, 0, 0, 0, TC, EO|ES|EC|FI, IC, 0, 0, 0, 0
+#define INP1   COL|MIL, COH|MIH, RO|II|CE|ME, BI|FI,    AI, 0, 0, 0, 0, 0,  EO|ES|EC|FI, IC, 0, 0, 0, 0
+#define NEG    COL|MIL, COH|MIH, RO|II|CE|ME, AO|BI, EO|ES|EC|AI, EO|FI|ES|EC|AI, IC, 0, 0, 0, 0, 0, 0, 0, 0, 0
+#define INC    COL|MIL, COH|MIH, RO|II|CE|ME, BI,    EO|FI|ES|EC|AI, IC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+#define DEC    COL|MIL, COH|MIH, RO|II|CE|ME, BI,    EO|FI|AI,       IC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 
-#define LDI    COL|MIL, COH|MIH, RO|II|CE|ME, RO|AI|CE|ME, IC,                   0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-#define ADI    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI,       EO|FI|AI|CE|ME,       IC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-#define SBI    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI,       EO|FI|ES|EC|AI|CE|ME, IC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-#define CPI    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI,       EO|FI|ES|EC|CE|ME,    IC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-#define ACIx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI,       EO|FI|AI|CE|ME,       IC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-#define ACIx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI,       EO|FI|EC|AI|CE|ME,    IC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-#define SCIx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI,       EO|FI|ES|AI|CE|ME,    IC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-#define SCIx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI,       EO|FI|ES|EC|AI|CE|ME, IC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+#define LDI    COL|MIL, COH|MIH, RO|II|CE|ME, RO|AI|CE, IC,             0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+#define CPI    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE, EO|FI|ES|EC,    IC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+#define ADI    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE, EO|FI|AI,       IC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+#define ACIx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE, EO|FI|AI,       IC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+#define ACIx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE, EO|FI|EC|AI,    IC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+#define SBI    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE, EO|FI|ES|EC|AI, IC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+#define SCIx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE, EO|FI|ES|AI,    IC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+#define SCIx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE, EO|FI|ES|EC|AI, IC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 
-#define JPA    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|CIH, BO|CIL, IC, 0, 0, 0, 0, 0, 0, 0, 0, 0
-#define LDA    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|AI|CE|ME, IC, 0, 0, 0, 0, 0, 0, 0, 0
-#define STA    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, AO|RI, CE|ME, IC, 0, 0, 0, 0, 0, 0, 0
-#define ADA    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI, EO|FI|AI|CE|ME, IC, 0, 0, 0, 0, 0, 0, 0
-#define SBA    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI, EO|FI|ES|EC|AI|CE|ME, IC, 0, 0, 0, 0, 0, 0, 0
-#define CPA    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI, EO|FI|ES|EC|CE|ME, IC, 0, 0, 0, 0, 0, 0, 0
-#define ACAx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI, EO|FI|AI|CE|ME, IC, 0, 0, 0, 0, 0, 0, 0
-#define ACAx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI, EO|FI|EC|AI|CE|ME, IC, 0, 0, 0, 0, 0, 0, 0
-#define SCAx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI, EO|FI|ES|AI|CE|ME, IC, 0, 0, 0, 0, 0, 0, 0
-#define SCAx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI, EO|FI|ES|EC|AI|CE|ME, IC, 0, 0, 0, 0, 0, 0, 0
+#define JPA    COL|MIL, COH|MIH, RO|II|CE|ME, RO|CIL|ME,   RO|CIH,    IC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+#define LDA    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|AI, IC, 0, 0, 0, 0, 0, 0, 0, 0
+#define STA    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, AO|RI, IC, 0, 0, 0, 0, 0, 0, 0, 0
+#define CPA    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|BI, EO|FI|ES|EC,    IC, 0, 0, 0, 0, 0, 0, 0
+#define ADA    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|BI, EO|FI|AI,       IC, 0, 0, 0, 0, 0, 0, 0
+#define ACAx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|BI, EO|FI|AI,       IC, 0, 0, 0, 0, 0, 0, 0
+#define ACAx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|BI, EO|FI|EC|AI,    IC, 0, 0, 0, 0, 0, 0, 0
+#define SBA    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|BI, EO|FI|ES|EC|AI, IC, 0, 0, 0, 0, 0, 0, 0
+#define SCAx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|BI, EO|FI|ES|AI,    IC, 0, 0, 0, 0, 0, 0, 0
+#define SCAx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|BI, EO|FI|ES|EC|AI, IC, 0, 0, 0, 0, 0, 0, 0
 
-#define JPR    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI|CE|ME, RO|CIH, BO|CIL, IC,    0,              0,  0, 0, 0, 0
-#define LDR    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|AI, IC,             0,  0, 0, 0, 0
-#define STR    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI|CE|ME, RO|MIH, BO|MIL, AO|RI, IC,             0,  0, 0, 0, 0
-#define ADR    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI, EO|FI|AI,       IC, 0, 0, 0, 0
-#define SBR    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI, EO|FI|ES|EC|AI, IC, 0, 0, 0, 0
-#define CPR    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI, EO|FI|ES|EC,    IC, 0, 0, 0, 0
-#define ACRx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI, EO|FI|AI,       IC, 0, 0, 0, 0
-#define ACRx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI, EO|FI|EC|AI,    IC, 0, 0, 0, 0
-#define SCRx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI, EO|FI|ES|AI,    IC, 0, 0, 0, 0
-#define SCRx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI, EO|FI|ES|EC|AI, IC, 0, 0, 0, 0
+#define JPR    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|CIL|ME, RO|CIH, IC, 0, 0, 0, 0, 0, 0, 0
+#define LDR    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|BI|ME,  RO|MIH, BO|MIL, RO|AI, IC, 0, 0, 0, 0, 0
+#define STR    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|BI|ME,  RO|MIH, BO|MIL, AO|RI, IC, 0, 0, 0, 0, 0
+#define CPR    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|BI|ME,  RO|MIH, BO|MIL, RO|BI, EO|FI|ES|EC,    IC, 0, 0, 0, 0
+#define ADR    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|BI|ME,  RO|MIH, BO|MIL, RO|BI, EO|FI|AI,       IC, 0, 0, 0, 0
+#define ACRx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|BI|ME,  RO|MIH, BO|MIL, RO|BI, EO|FI|AI,       IC, 0, 0, 0, 0
+#define ACRx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|BI|ME,  RO|MIH, BO|MIL, RO|BI, EO|FI|EC|AI,    IC, 0, 0, 0, 0
+#define SBR    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|BI|ME,  RO|MIH, BO|MIL, RO|BI, EO|FI|ES|EC|AI, IC, 0, 0, 0, 0
+#define SCRx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|BI|ME,  RO|MIH, BO|MIL, RO|BI, EO|FI|ES|AI,    IC, 0, 0, 0, 0
+#define SCRx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|BI|ME,  RO|MIH, BO|MIL, RO|BI, EO|FI|ES|EC|AI, IC, 0, 0, 0, 0
 
-#define CLB    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL|AI, EO|FI|ES|EC|RI, EO|FI|ES|EC|AI|CE|ME, IC, 0, 0, 0, 0, 0, 0, 0
-#define NEB    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|AI|BI, EO|FI|ES|EC|AI, EO|FI|ES|EC|RI, EO|FI|ES|EC|AI|CE|ME, IC, 0, 0, 0, 0, 0
-#define INB    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|AI|BI, EO|FI|ES|EC|BI, EO|FI|EC|RI, EO|FI|EC|AI|CE|ME, IC, 0, 0, 0, 0, 0
-#define DEB    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|AI|BI, EO|FI|ES|EC|BI, EO|FI|ES|RI, EO|FI|ES|AI|CE|ME, IC, 0, 0, 0, 0, 0
-#define ADB    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI, EO|FI|RI, CE|ME, IC, 0, 0, 0, 0, 0, 0
-#define SBB    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, AO|BI, RO|AI, EO|FI|ES|EC|RI, BO|AI|CE|ME, IC, 0, 0, 0, 0, 0
-#define ACBx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, AO|BI, RO|AI, EO|FI|AI,       AO|RI, BO|AI|CE|ME, IC, 0, 0, 0, 0
-#define ACBx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, AO|BI, RO|AI, EO|FI|EC|AI,    AO|RI, BO|AI|CE|ME, IC, 0, 0, 0, 0
-#define SCBx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, AO|BI, RO|AI, EO|FI|ES|AI,    AO|RI, BO|AI|CE|ME, IC, 0, 0, 0, 0
-#define SCBx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, AO|BI, RO|AI, EO|FI|ES|EC|AI, AO|RI, BO|AI|CE|ME, IC, 0, 0, 0, 0
+#define CLB    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, AO|BI,    EO|ES|EC|RI, IC, 0, 0, 0, 0, 0, 0, 0
+#define NEB    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|AI|BI, EO|ES|EC|AI, EO|ES|EC|RI, EO|FI|ES|EC|AI, IC, 0, 0, 0, 0, 0
+#define INB    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|AI|BI, EO|ES|EC|BI, EO|EC|RI, EO|FI|EC|AI, IC, 0, 0, 0, 0, 0
+#define DEB    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|AI|BI, EO|ES|EC|BI, EO|ES|RI, EO|FI|ES|AI, IC, 0, 0, 0, 0, 0
+#define ADB    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|BI,    EO|FI|RI,    IC, 0, 0, 0, 0, 0, 0, 0
+#define ACBx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|BI,    EO|FI|BI,    BO|RI, IC, 0, 0, 0, 0, 0, 0
+#define ACBx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|BI,    EO|FI|EC|BI, BO|RI, IC, 0, 0, 0, 0, 0, 0
+#define SBB    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, AO|BI,    RO|AI, EO|FI|ES|EC|RI, BO|AI, IC, 0, 0, 0, 0, 0
+#define SCBx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, AO|BI,    RO|AI, EO|FI|ES|AI,    AO|RI, BO|AI, IC, 0, 0, 0, 0
+#define SCBx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, AO|BI,    RO|AI, EO|FI|ES|EC|AI, AO|RI, BO|AI, IC, 0, 0, 0, 0
 
-#define CLW    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, AO|BI, EO|FI|ES|EC|RI, CE|ME, EO|FI|ES|EC|RI, IC, 0, 0, 0, 0, 0
-#define NEWx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|AI|BI, EO|FI|ES|EC|AI, EO|FI|ES|EC|RI, CE|ME, RO|BI, EO|FI|ES|AI,     AO|RI, IC, 0, 0
-#define NEWx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|AI|BI, EO|FI|ES|EC|AI, EO|FI|ES|EC|RI, CE|ME, RO|BI, EO|FI|ES|EC|AI, AO|RI, IC, 0, 0
-#define INWx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|AI|BI, EO|FI|ES|EC|BI, EO|FI|EC|RI, CE|ME|BI, RO|AI, EO|FI|ES|AI,     AO|RI, IC, 0, 0
-#define INWx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|AI|BI, EO|FI|ES|EC|BI, EO|FI|EC|RI, CE|ME|BI, RO|AI, EO|FI|ES|EC|AI, AO|RI, IC, 0, 0
-#define DEWx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|AI|BI, EO|FI|ES|EC|BI, EO|FI|ES|RI, CE|ME|BI, RO|AI, EO|FI|AI,       AO|RI, IC, 0, 0
-#define DEWx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|AI|BI, EO|FI|ES|EC|BI, EO|FI|ES|RI, CE|ME|BI, RO|AI, EO|FI|EC|AI,     AO|RI, IC, 0, 0
-#define ADWx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI, EO|FI|RI, CE|ME|BI, RO|AI, EO|FI|ES|AI,    AO|RI, IC, 0, 0, 0
-#define ADWx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI, EO|FI|RI, CE|ME|BI, RO|AI, EO|FI|ES|EC|AI, AO|RI, IC, 0, 0, 0
-#define SBWx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, AO|BI, RO|AI, EO|FI|ES|EC|RI, CE|ME|BI, RO|AI, EO|FI|AI,    AO|RI, IC, 0, 0
-#define SBWx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, AO|BI, RO|AI, EO|FI|ES|EC|RI, CE|ME|BI, RO|AI, EO|FI|EC|AI, AO|RI, IC, 0, 0
-#define ACWx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI, EO|FI|BI,    BO|RI, CE|ME|BI, RO|AI, EO|FI|ES|AI,    AO|RI, IC, 0, 0
-#define ACWx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, RO|BI, EO|FI|EC|BI, BO|RI, CE|ME|BI, RO|AI, EO|FI|ES|EC|AI, AO|RI, IC, 0, 0
-#define SCWx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, AO|BI, RO|AI, EO|FI|ES|BI,    BO|RI, CE|ME|BI, RO|AI, EO|FI|AI,     AO|RI, IC, 0
-#define SCWx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH, BO|MIL, AO|BI, RO|AI, EO|FI|ES|EC|BI, BO|RI, CE|ME|BI, RO|AI, EO|FI|EC|AI, AO|RI, IC, 0
+#define CLW    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, AO|BI,    EO|ES|EC|RI, ME, EO|ES|EC|RI, IC, 0, 0, 0, 0, 0
+#define NEWx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|AI|BI, EO|ES|EC|AI, EO|FI|ES|EC|RI, ME,    RO|BI, EO|FI|ES|AI,    AO|RI, IC, 0, 0
+#define NEWx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|AI|BI, EO|ES|EC|AI, EO|FI|ES|EC|RI, ME,    RO|BI, EO|FI|ES|EC|AI, AO|RI, IC, 0, 0
+#define INWx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|AI|BI, EO|ES|EC|BI, EO|FI|EC|RI,    ME|BI, RO|AI, EO|FI|ES|AI,    AO|RI, IC, 0, 0
+#define INWx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|AI|BI, EO|ES|EC|BI, EO|FI|EC|RI,    ME|BI, RO|AI, EO|FI|ES|EC|AI, AO|RI, IC, 0, 0
+#define DEWx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|AI|BI, EO|ES|EC|BI, EO|FI|ES|RI,    ME|BI, RO|AI, EO|FI|AI,       AO|RI, IC, 0, 0
+#define DEWx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|AI|BI, EO|ES|EC|BI, EO|FI|ES|RI,    ME|BI, RO|AI, EO|FI|EC|AI,    AO|RI, IC, 0, 0
 
-#define LDS    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, MIH, MIL, RO|AI, EO|FI|MIL, RO|AI, IC, 0, 0, 0, 0, 0, 0
-#define STS    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, MIH, MIL, RO|MIL, AO|RI, MIL, RO|AI, EO|FI|BI, MIL, RO|MIL, RO|AI, BO|MIL, AO|RI
-#define PHS    COL|MIL, COH|MIH, RO|II|CE|ME, MIH, MIL, RO|MIL|BI, AO|RI, BO|AI,  EO|FI|ES|BI|MIL, EO|FI|RI, AO|MIL, RO|AI, IC, 0, 0, 0
-#define PLS    COL|MIL, COH|MIH, RO|II|CE|ME, MIH, MIL|BI, RO|AI, EO|FI|ES|EC|AI, AO|RI, AO|MIL, RO|AI, IC, 0, 0, 0, 0, 0
-#define JPS    COL|MIL, COH|MIH, RO|II|CE|ME, MIH, MIL|BI, RO|AI|MIL, COL|RI, EO|FI|AI|MIL, COH|RI, BO|MIL, EO|FI|RI, COL|MIL, COH|MIH, RO|BI|CE|ME, RO|CIH, BO|CIL
-#define RTS    COL|MIL, COH|MIH, RO|II|CE|ME, MIH, MIL|BI, RO|AI|MIL, EO|FI|ES|EC|AI|MIL, RO|CIH, EO|FI|ES|EC|AI|MIL, RO|CIL, BO|MIL, AO|RI, CE|ME, CE|ME, IC, 0
+#define ADWx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|BI, EO|FI|RI,           ME|BI, RO|AI, EO|FI|ES|AI,    AO|RI, IC, 0, 0, 0
+#define ADWx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|BI, EO|FI|RI,           ME|BI, RO|AI, EO|FI|ES|EC|AI, AO|RI, IC, 0, 0, 0
+#define ACWx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|BI, EO|FI|BI,    BO|RI, ME|BI, RO|AI, EO|FI|ES|AI,    AO|RI, IC, 0, 0
+#define ACWx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, RO|BI, EO|FI|EC|BI, BO|RI, ME|BI, RO|AI, EO|FI|ES|EC|AI, AO|RI, IC, 0, 0
+#define SBWx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, AO|BI, RO|AI, EO|FI|ES|EC|RI,        ME|BI, RO|AI, EO|FI|AI,    AO|RI, IC, 0, 0
+#define SBWx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, AO|BI, RO|AI, EO|FI|ES|EC|RI,        ME|BI, RO|AI, EO|FI|EC|AI, AO|RI, IC, 0, 0
+#define SCWx0x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, AO|BI, RO|AI, EO|FI|ES|BI,    BO|RI, ME|BI, RO|AI, EO|FI|AI,    AO|RI, IC, 0
+#define SCWx1x COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|MIH|CE, BO|MIL, AO|BI, RO|AI, EO|FI|ES|EC|BI, BO|RI, ME|BI, RO|AI, EO|FI|EC|AI, AO|RI, IC, 0
 
-#define BRA    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE|ME, RO|CIH, BO|CIL, IC, 0, 0, 0, 0, 0, 0, 0, 0, 0    // branching
-#define ___    COL|MIL, COH|MIH, RO|II|CE|ME, CE|ME,       CE|ME,  IC,     0,  0, 0, 0, 0, 0, 0, 0, 0, 0    // non-branching
+#define LDS    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE, MIH|MIL, RO|AI, EO|MIL, RO|AI, IC, 0, 0, 0, 0, 0, 0, 0
+#define STS    COL|MIL, COH|MIH, RO|II|CE|ME, RO|BI|CE, MIH|MIL, RO|MIL, AO|RI, MIL, RO|AI, EO|BI, MIL, RO|MIL, RO|AI, BO|MIL, AO|RI, IC
+#define PHS    COL|MIL, COH|MIH, RO|II|CE|ME, MIH|MIL, RO|MIL|BI, AO|RI, BO|AI,  EO|ES|BI|MIL, EO|RI, AO|MIL, RO|AI, IC, 0, 0, 0, 0
+#define PLS    COL|MIL, COH|MIH, RO|II|CE|ME, MIH|MIL|BI, RO|AI, EO|ES|EC|AI, AO|RI, AO|MIL, RO|AI, IC, 0, 0, 0, 0, 0, 0
+#define JPS    COL|MIL, COH|MIH, RO|II|CE|ME, MIH|MIL|BI, RO|AI|MIL, COL|RI, EO|AI|MIL, COH|RI, BO|MIL, EO|RI, COL|MIL, COH|MIH, RO|CIL|ME, RO|CIH, IC, 0
+#define RTS    COL|MIL, COH|MIH, RO|II|CE|ME, MIH|MIL, RO|MIL|CIL, CE|ME, CE, COL|BI, RO|CIH|ME, RO|CIL, MIL|CE, BO|RI|CE, IC, 0, 0, 0
 
-uint32_t controlWord[0x4000]
-{
-  /* BNCZ    target: A, operand: inherent                                                        target: A, operand: immediate        target: A, operand:  byte at abs address       target: A, operand:  byte at rel address       target: byte at abs address, operand: A        target: word at abs address, operand: A                       stack operations               BNE  BEQ  BCC  BCS  BPL  BMI */
-  /* ---- */ NOP, BNK, Out, CLC, SEC, LSL, ROLx0x, LSRx0x, RORx0x, ASR00x, INP0, NEG, Inc, Dec,  LDI, ADI, SBI, CPI, ACIx0x, SCIx0x,  JPA, LDA, STA, ADA, SBA, CPA, ACAx0x, SCAx0x,  JPR, LDR, STR, ADR, SBR, CPR, ACRx0x, SCRx0x,  CLB, NEB, INB, DEB, ADB, SBB, ACBx0x, SCBx0x,  CLW, NEWx0x, INWx0x, DEWx0x, ADWx0x, SBWx0x, ACWx0x, SCWx0x,  LDS, STS, PHS, PLS, JPS, RTS,  BRA, ___, BRA, ___, BRA, ___,
-  /* ---1 */ NOP, BNK, Out, CLC, SEC, LSL, ROLx0x, LSRx0x, RORx0x, ASR00x, INP0, NEG, Inc, Dec,  LDI, ADI, SBI, CPI, ACIx0x, SCIx0x,  JPA, LDA, STA, ADA, SBA, CPA, ACAx0x, SCAx0x,  JPR, LDR, STR, ADR, SBR, CPR, ACRx0x, SCRx0x,  CLB, NEB, INB, DEB, ADB, SBB, ACBx0x, SCBx0x,  CLW, NEWx0x, INWx0x, DEWx0x, ADWx0x, SBWx0x, ACWx0x, SCWx0x,  LDS, STS, PHS, PLS, JPS, RTS,  ___, BRA, BRA, ___, BRA, ___,
-  /* --1- */ NOP, BNK, Out, CLC, SEC, LSL, ROLx1x, LSRx1x, RORx1x, ASR01x, INP0, NEG, Inc, Dec,  LDI, ADI, SBI, CPI, ACIx1x, SCIx1x,  JPA, LDA, STA, ADA, SBA, CPA, ACAx1x, SCAx1x,  JPR, LDR, STR, ADR, SBR, CPR, ACRx1x, SCRx1x,  CLB, NEB, INB, DEB, ADB, SBB, ACBx1x, SCBx1x,  CLW, NEWx1x, INWx1x, DEWx1x, ADWx1x, SBWx1x, ACWx1x, SCWx1x,  LDS, STS, PHS, PLS, JPS, RTS,  BRA, ___, ___, BRA, BRA, ___,
-  /* --11 */ NOP, BNK, Out, CLC, SEC, LSL, ROLx1x, LSRx1x, RORx1x, ASR01x, INP0, NEG, Inc, Dec,  LDI, ADI, SBI, CPI, ACIx1x, SCIx1x,  JPA, LDA, STA, ADA, SBA, CPA, ACAx1x, SCAx1x,  JPR, LDR, STR, ADR, SBR, CPR, ACRx1x, SCRx1x,  CLB, NEB, INB, DEB, ADB, SBB, ACBx1x, SCBx1x,  CLW, NEWx1x, INWx1x, DEWx1x, ADWx1x, SBWx1x, ACWx1x, SCWx1x,  LDS, STS, PHS, PLS, JPS, RTS,  ___, BRA, ___, BRA, BRA, ___,
-  /* -1-- */ NOP, BNK, Out, CLC, SEC, LSL, ROLx0x, LSRx0x, RORx0x, ASR10x, INP0, NEG, Inc, Dec,  LDI, ADI, SBI, CPI, ACIx0x, SCIx0x,  JPA, LDA, STA, ADA, SBA, CPA, ACAx0x, SCAx0x,  JPR, LDR, STR, ADR, SBR, CPR, ACRx0x, SCRx0x,  CLB, NEB, INB, DEB, ADB, SBB, ACBx0x, SCBx0x,  CLW, NEWx0x, INWx0x, DEWx0x, ADWx0x, SBWx0x, ACWx0x, SCWx0x,  LDS, STS, PHS, PLS, JPS, RTS,  BRA, ___, BRA, ___, ___, BRA,
-  /* -1-1 */ NOP, BNK, Out, CLC, SEC, LSL, ROLx0x, LSRx0x, RORx0x, ASR10x, INP0, NEG, Inc, Dec,  LDI, ADI, SBI, CPI, ACIx0x, SCIx0x,  JPA, LDA, STA, ADA, SBA, CPA, ACAx0x, SCAx0x,  JPR, LDR, STR, ADR, SBR, CPR, ACRx0x, SCRx0x,  CLB, NEB, INB, DEB, ADB, SBB, ACBx0x, SCBx0x,  CLW, NEWx0x, INWx0x, DEWx0x, ADWx0x, SBWx0x, ACWx0x, SCWx0x,  LDS, STS, PHS, PLS, JPS, RTS,  ___, BRA, BRA, ___, ___, BRA,
-  /* -11- */ NOP, BNK, Out, CLC, SEC, LSL, ROLx1x, LSRx1x, RORx1x, ASR11x, INP0, NEG, Inc, Dec,  LDI, ADI, SBI, CPI, ACIx1x, SCIx1x,  JPA, LDA, STA, ADA, SBA, CPA, ACAx1x, SCAx1x,  JPR, LDR, STR, ADR, SBR, CPR, ACRx1x, SCRx1x,  CLB, NEB, INB, DEB, ADB, SBB, ACBx1x, SCBx1x,  CLW, NEWx1x, INWx1x, DEWx1x, ADWx1x, SBWx1x, ACWx1x, SCWx1x,  LDS, STS, PHS, PLS, JPS, RTS,  BRA, ___, ___, BRA, ___, BRA,
-  /* -111 */ NOP, BNK, Out, CLC, SEC, LSL, ROLx1x, LSRx1x, RORx1x, ASR11x, INP0, NEG, Inc, Dec,  LDI, ADI, SBI, CPI, ACIx1x, SCIx1x,  JPA, LDA, STA, ADA, SBA, CPA, ACAx1x, SCAx1x,  JPR, LDR, STR, ADR, SBR, CPR, ACRx1x, SCRx1x,  CLB, NEB, INB, DEB, ADB, SBB, ACBx1x, SCBx1x,  CLW, NEWx1x, INWx1x, DEWx1x, ADWx1x, SBWx1x, ACWx1x, SCWx1x,  LDS, STS, PHS, PLS, JPS, RTS,  ___, BRA, ___, BRA, ___, BRA,
-  /* 1--- */ NOP, BNK, Out, CLC, SEC, LSL, ROLx0x, LSRx0x, RORx0x, ASR00x, INP1, NEG, Inc, Dec,  LDI, ADI, SBI, CPI, ACIx0x, SCIx0x,  JPA, LDA, STA, ADA, SBA, CPA, ACAx0x, SCAx0x,  JPR, LDR, STR, ADR, SBR, CPR, ACRx0x, SCRx0x,  CLB, NEB, INB, DEB, ADB, SBB, ACBx0x, SCBx0x,  CLW, NEWx0x, INWx0x, DEWx0x, ADWx0x, SBWx0x, ACWx0x, SCWx0x,  LDS, STS, PHS, PLS, JPS, RTS,  BRA, ___, BRA, ___, BRA, ___,
-  /* 1--1 */ NOP, BNK, Out, CLC, SEC, LSL, ROLx0x, LSRx0x, RORx0x, ASR00x, INP1, NEG, Inc, Dec,  LDI, ADI, SBI, CPI, ACIx0x, SCIx0x,  JPA, LDA, STA, ADA, SBA, CPA, ACAx0x, SCAx0x,  JPR, LDR, STR, ADR, SBR, CPR, ACRx0x, SCRx0x,  CLB, NEB, INB, DEB, ADB, SBB, ACBx0x, SCBx0x,  CLW, NEWx0x, INWx0x, DEWx0x, ADWx0x, SBWx0x, ACWx0x, SCWx0x,  LDS, STS, PHS, PLS, JPS, RTS,  ___, BRA, BRA, ___, BRA, ___,
-  /* 1-1- */ NOP, BNK, Out, CLC, SEC, LSL, ROLx1x, LSRx1x, RORx1x, ASR01x, INP1, NEG, Inc, Dec,  LDI, ADI, SBI, CPI, ACIx1x, SCIx1x,  JPA, LDA, STA, ADA, SBA, CPA, ACAx1x, SCAx1x,  JPR, LDR, STR, ADR, SBR, CPR, ACRx1x, SCRx1x,  CLB, NEB, INB, DEB, ADB, SBB, ACBx1x, SCBx1x,  CLW, NEWx1x, INWx1x, DEWx1x, ADWx1x, SBWx1x, ACWx1x, SCWx1x,  LDS, STS, PHS, PLS, JPS, RTS,  BRA, ___, ___, BRA, BRA, ___,
-  /* 1-11 */ NOP, BNK, Out, CLC, SEC, LSL, ROLx1x, LSRx1x, RORx1x, ASR01x, INP1, NEG, Inc, Dec,  LDI, ADI, SBI, CPI, ACIx1x, SCIx1x,  JPA, LDA, STA, ADA, SBA, CPA, ACAx1x, SCAx1x,  JPR, LDR, STR, ADR, SBR, CPR, ACRx1x, SCRx1x,  CLB, NEB, INB, DEB, ADB, SBB, ACBx1x, SCBx1x,  CLW, NEWx1x, INWx1x, DEWx1x, ADWx1x, SBWx1x, ACWx1x, SCWx1x,  LDS, STS, PHS, PLS, JPS, RTS,  ___, BRA, ___, BRA, BRA, ___,
-  /* 11-- */ NOP, BNK, Out, CLC, SEC, LSL, ROLx0x, LSRx0x, RORx0x, ASR10x, INP1, NEG, Inc, Dec,  LDI, ADI, SBI, CPI, ACIx0x, SCIx0x,  JPA, LDA, STA, ADA, SBA, CPA, ACAx0x, SCAx0x,  JPR, LDR, STR, ADR, SBR, CPR, ACRx0x, SCRx0x,  CLB, NEB, INB, DEB, ADB, SBB, ACBx0x, SCBx0x,  CLW, NEWx0x, INWx0x, DEWx0x, ADWx0x, SBWx0x, ACWx0x, SCWx0x,  LDS, STS, PHS, PLS, JPS, RTS,  BRA, ___, BRA, ___, ___, BRA,
-  /* 11-1 */ NOP, BNK, Out, CLC, SEC, LSL, ROLx0x, LSRx0x, RORx0x, ASR10x, INP1, NEG, Inc, Dec,  LDI, ADI, SBI, CPI, ACIx0x, SCIx0x,  JPA, LDA, STA, ADA, SBA, CPA, ACAx0x, SCAx0x,  JPR, LDR, STR, ADR, SBR, CPR, ACRx0x, SCRx0x,  CLB, NEB, INB, DEB, ADB, SBB, ACBx0x, SCBx0x,  CLW, NEWx0x, INWx0x, DEWx0x, ADWx0x, SBWx0x, ACWx0x, SCWx0x,  LDS, STS, PHS, PLS, JPS, RTS,  ___, BRA, BRA, ___, ___, BRA,
-  /* 111- */ NOP, BNK, Out, CLC, SEC, LSL, ROLx1x, LSRx1x, RORx1x, ASR11x, INP1, NEG, Inc, Dec,  LDI, ADI, SBI, CPI, ACIx1x, SCIx1x,  JPA, LDA, STA, ADA, SBA, CPA, ACAx1x, SCAx1x,  JPR, LDR, STR, ADR, SBR, CPR, ACRx1x, SCRx1x,  CLB, NEB, INB, DEB, ADB, SBB, ACBx1x, SCBx1x,  CLW, NEWx1x, INWx1x, DEWx1x, ADWx1x, SBWx1x, ACWx1x, SCWx1x,  LDS, STS, PHS, PLS, JPS, RTS,  BRA, ___, ___, BRA, ___, BRA,
-  /* 1111 */ NOP, BNK, Out, CLC, SEC, LSL, ROLx1x, LSRx1x, RORx1x, ASR11x, INP1, NEG, Inc, Dec,  LDI, ADI, SBI, CPI, ACIx1x, SCIx1x,  JPA, LDA, STA, ADA, SBA, CPA, ACAx1x, SCAx1x,  JPR, LDR, STR, ADR, SBR, CPR, ACRx1x, SCRx1x,  CLB, NEB, INB, DEB, ADB, SBB, ACBx1x, SCBx1x,  CLW, NEWx1x, INWx1x, DEWx1x, ADWx1x, SBWx1x, ACWx1x, SCWx1x,  LDS, STS, PHS, PLS, JPS, RTS,  ___, BRA, ___, BRA, ___, BRA,
-};
+#define BRA    COL|MIL, COH|MIH, RO|II|CE|ME, RO|CIL|ME, RO|CIH, IC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+#define ___    COL|MIL, COH|MIH, RO|II|CE|ME, CE,        CE,     IC, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
