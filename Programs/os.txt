@@ -1,35 +1,36 @@
 ; ********************************************************************************
 ; *****                                                                      *****
-; ***** MinOS 1.5.2 for the 8-Bit Minimal Computer System Revision 1.3 - 1.5 *****
+; ***** MinOS 1.5.3 for the 8-Bit Minimal Computer System Revision 1.3 - 1.6 *****
 ; *****                                                                      *****
-; *****        written by Carsten Herting - last update Jan 25th 2022        *****
+; *****        written by Carsten Herting - last update Jul 7th 2022         *****
 ; *****                                                                      *****
 ; ********************************************************************************
-; Usage for in-situ programming: Open command shell, type 'asm os.txt', upload
-; image via terminal to 0xe000 - 0xefff, load prom, type 8000 r, enjoy new OS.
+; Usage for in-situ programming: Open command shell, type 'asm os.txt',
+; set monitor to address 0xe000 and upload by pasting into the terminal,
+; load prom, type 8000 r, confirm with 'y' and enjoy your updated OS.
 
 ; **************************************************************************
 ; Creates a file header for a non-deletable OS image and copies the OS image
 ; **************************************************************************
-                  0                                            ; NOP mimics a non-deletable empty filename
-                LDI <OS_SOURCE STA 0xfffc                      ; prepare OS image address at 0xfffc/d
-                CLB 0xfffd
-                CLB 0xfffe                                     ; prepare OS target address at 0xfffe/f
-                LDI 0xf0 STA 0xffff
-                JPA imcopyloop
-                  0xf000, 0x0fe8                               ; mimics startadr and bytesize (uses 4KB for OS image)
-  imcopyloop:   LDR 0xfffc STR 0xfffe                          ; copy the OS image
+#org 0x0000
+                  0                                            ; = NOP, mimics a non-deletable empty filename
+                LDI <OS_Copy_Start STA 0xfffc CLB 0xfffd       ; prepare OS image address at 0xfffc/d
+                CLB 0xfffe LDI 0xf0 STA 0xffff                 ; prepare OS target address at 0xfffe/f
+                JPA imcopyloop                                 ; jump over file header stuff
+                  0xf000, 0x0fe8                               ; file header stuff (startadr and bytesize, OS uses 4KB)
+  imcopyloop:   LDR 0xfffc STR 0xfffe                          ; copy the OS image to RAM
                 INW 0xfffc INW 0xfffe
-                LDA 0xffff CPI >OS_END BCC imcopyloop          ; has the OS code been copied?
-                LDA 0xfffe CPI <OS_END BCC imcopyloop
+                LDA 0xfffe CPI <OS_Copy_End BNE imcopyloop
+                  LDA 0xffff CPI >OS_Copy_End BCC imcopyloop   ; has all the OS code been copied?
 
 ; ************************
 ; START OF THE MINOS IMAGE
 ; ************************
-                OS_SOURCE:                                     ; OS image starts HERE
-  #end                                                         ; suppress change of data input address...
-  #org 0xf000                                                  ; ... but assemble for this destination
-  #begin
+OS_Copy_Start:                                                 ; OS image starts HERE
+
+  #end                                                         ; do not emit origin address...
+  #org 0xf000                                                  ; ... but assemble for this destination 
+  #begin                                                       ; begin emitting code here
 
   _Start:       JPA OS_Start                                   ; MINOS JUMP/POINTER TABLE
   _Prompt:      JPA OS_Prompt
@@ -40,8 +41,8 @@
   _SaveFile:    JPA SSD_SaveFile
   _MemMove:     JPA OS_MemMove
   _FindFile:    JPA SSD_FindFile
-  _Mnemonics:   mnemonics
-                0xffff                                         ; unused
+  _Mnemonics:   mnemonics                                      ; pointer to ordered mnemonics list
+                0xffff                                         ; unused pointer
   _HexToWord:   JPA HexToWord
   _CursorX:     JPA OS_CursorX
   _CursorY:     JPA OS_CursorY
@@ -50,20 +51,20 @@
 
   OS_Start:     LDI 0xfe STA 0xffff                            ; stack init
 
-                LDI <hometxt PHS LDI >hometxt                  ; print the OS splash screen
-                PHS JPS OS_Print PLS PLS
+                LDI <hometxt PHS LDI >hometxt PHS              ; print the OS splash screen
+                JPS OS_Print PLS PLS
                 JPS OS_DrawLine JPS OS_PrintEnter
-                LDI <starttxt PHS LDI >starttxt
-                PHS JPS OS_Print PLS PLS
+                LDI <starttxt PHS LDI >starttxt PHS
+                JPS OS_Print PLS PLS
                 JPS OS_DrawLine JPS OS_PrintEnter
 
   OS_Prompt:    LDA OS_MemAddr+1 PHS JPS OS_PrintHex PLS       ; schreibe die aktuelle examine-Adresse
                 LDA OS_MemAddr+0 PHS JPS OS_PrintHex PLS
                 JPS OS_PrintSpace
-                JPS OS_ReadLine                     ; get a line of input until ENTER or end of string is hit
-                JPS preset                          ; reset parsing variables and pointers
-                CLB OS_Mode                         ; start with monitor mode = 0
-  parsing:      LDR OS_ParsePtr                     ; ***** BYTE-BY-BYTE PARSING OF THE LINE INPUT *****
+                JPS OS_ReadLine                     ; get a line of input until ENTER or end of input buffer
+                JPS presetparse                     ; reset parsed number and mnemonic input
+                CLB OS_Mode                         ; monitor mode = 0
+  parsing:      LDR OS_ParsePtr                     ; BYTE-BY-BYTE PARSING OF THE LINE INPUT BUFFER
                 CPI 'l' BEQ OS_LoadFile             ; COMMANDS
                 CPI 's' BEQ OS_SaveFile
                 CPI 'z' BEQ OS_ZapFile
@@ -78,7 +79,7 @@
                 CPI ':' BEQ doppel                  ; : switch to 'deposit' mode
                 CPI '.' BEQ punkt                   ; . switch to 'list' mode
                 CPI 'a' BCS sletter                 ; a..f for hex numbers
-                CPI 'A' BCS bletter                  ; A..Z for letters
+                CPI 'A' BCS bletter                 ; A..Z for letters
                 CPI '0' BCS zahl                    ; 0..9 for numbers
                   LDA OS_ParseNum+2                 ; interpretiere Zeichen als GO! according to mode (hier ' ' oder ENTER)
                   CPI 0 BEQ validdata               ; prüfe, ob überhaupt valide parse-Daten vorliegen
@@ -141,17 +142,17 @@
                 BNE shiftloop
                   PLS ADB OS_ParseNum               ; add new hex nibble to the right
                   JPA parsed
-    clrparsed:  JPS preset                          ; ***** ENDE DES PARSINGS (AUCH MEHRERER BYTES) *****
-    parsed:     LDR OS_ParsePtr                     ; ENDE DES PARSINGS EINES BYTES
+  clrparsed:    JPS presetparse                     ; ***** ENDE DES PARSINGS (AUCH MEHRERER BYTES) *****
+  parsed:       LDR OS_ParsePtr                     ; ENDE DES PARSINGS EINES BYTES
                 CPI 10                              ; prüfe hier NOCHMAL auf ENTER wg. Zeilenende
                 BEQ OS_Prompt                       ; Zeilenende -> warten auf eine neue Zeile
                   INB OS_ParsePtr                   ; gehe zum nächsten Zeichen des Puffers
                   BCS OS_ErrorPrompt                ; Zeile zu lang? -> ERROR
                     JPA parsing                     ; nächstes byte aus input parsen
-    preset:     CLW OS_ParseNum                     ; clear parsed number
+  presetparse:  CLW OS_ParseNum                     ; clear parsed number
                 LDI 0xf0 STA OS_ParseNum+2          ; invalidate parsed number
-                LDI <OS_PtrC STA OS_PtrB+0          ; reset pointer to start of mnemonic input string
-                LDI >OS_PtrC STA OS_PtrB+1
+                LDI <OS_PtrC STA OS_PtrB+0          ; reset OS_PtrB to start of mnemonic input buffer
+                LDI >OS_PtrC STA OS_PtrB+1          ; OS_PtrC serves as 3-byte mnemonic input buffer
                 RTS
   validdata:      LDA OS_Mode                       ; ***** ES LIEGT EIN VALIDES PARSE-DATUM VOR *****
                   DEC
@@ -179,7 +180,7 @@
                   DEB OS_Count
                   CPI 8 BNE notmiddle
                     JPS OS_PrintSpace               ; print an extra space after 8 bytes
-                    JPA nextlist                    ; bug-fix by paulscottrobson - thank you!
+                    JPA nextlist                    ; bug-fix by paulscottrobson Thank you!
   notmiddle:      CPI 0 BNE nextlist
                     JPS OS_PrintEnter
                     DEB OS_PtrC                     ; reuse as line counter
@@ -194,23 +195,23 @@
 
 ; ************************************************************************************************************************
 
-; **************************
-; Generates a random byte
-; push: --
+; ******************************
+; Generates a pseudo-random byte
+; push: #
 ; pull: value
-; **************************
-OS_Random:      INB RandomX                ; x++
-                LDA RandomC PHS
-                LDA RandomX PHS
+; ******************************
+OS_Random:      INB OS_RandomState+0          ; x++
+                LDA OS_RandomState+3 PHS      ; c
+                LDA OS_RandomState+0 PHS
                 JPS OS_XOR PLS
-                LDA RandomA PHS
+                LDA OS_RandomState+1 PHS
                 JPS OS_XOR PLS
-                LDS 1 STA RandomA          ; a = a^c^x
-                ADB RandomB                ; b = b+a
-                LDA RandomB LSR
-                ADA RandomC PHS
+                LDS 1 STA OS_RandomState+1    ; a = a^c^x
+                ADB OS_RandomState+2          ; b = b+a
+                LDA OS_RandomState+2 LSR
+                ADA OS_RandomState+3 PHS
                 JPS OS_XOR PLS
-                PLS STA RandomC            ; c = (c+(b>>1))^a)
+                PLS STA OS_RandomState+3      ; c = (c+(b>>1))^a)
                 STS 3 RTS
 
 ; **************************
@@ -244,7 +245,7 @@ OS_PrintSpace:      LDI ' ' JPA printchar
   OS_ErrorPrompt:   JPS OS_PrintError                     ; display error '?' and goto WOZMON newline input
                     JPA OS_Prompt
 
-  OS_DrawLine:      JPS dl_plus                           ; draw +---------+ line for splash screen
+  OS_DrawLine:      JPS dl_plus                           ; +----------+ line for splash screen
                     LDI 40 STA OS_Count
     dl_loop:        LDI '-' OUT JPS _WaitUART
                     DEB OS_Count BNE dl_loop
@@ -253,7 +254,7 @@ OS_PrintSpace:      LDI ' ' JPA printchar
 
 ; **************************
 ; Ask user a yes/no question
-; push: --
+; push: #
 ; pull: key
 ; success: key = 'y'
 ; **************************
@@ -266,7 +267,7 @@ OS_PrintSpace:      LDI ' ' JPA printchar
 ; Reading in keyboard input into OS_InpBuf until <ENTER> is hit or string is filled
 ; *********************************************************************************
 OS_ReadLine:  JPS readexit                            ; resets the LSB of OS_ParsePtr
-  readchar:   INP BEQ readchar                        ; FAST testing (reading/clearing must happen within 616 cycles of receiving)
+  readchar:   INP BEQ readchar                        ; FAST testing (reading/clearing must happen within 16 cycles of receiving)
                 OUT                                   ; 4 output without waiting, since the maximum receive rate is 115.2kHz anyway
                 STR OS_ParsePtr                       ; 10
                 CPI 10 BEQ readexit                   ; 10 teste auf ENTER & BACKSPACE
@@ -280,7 +281,7 @@ OS_ReadLine:  JPS readexit                            ; resets the LSB of OS_Par
                   BCC readchar                        ; 6(5) maximale Anzahl von Zeichen wurde eingelesen
   readexit:         LDI >OS_InpBuf STA OS_ParsePtr+1  ; 12 reset the line pointer
                     LDI <OS_InpBuf STA OS_ParsePtr+0  ; 12
-                    NOP NOP NOP NOP NOP NOP           ; 96
+                    NOP NOP NOP NOP NOP NOP           ; 96 wait for ENTER to be transmitted
                     RTS                               ; 14
 
 ; **********************************************************
@@ -327,7 +328,7 @@ HexToWord:      LDS 3 STA OS_ParsePtr+1
 ; ********************************************************************************************
 ; Schreibt einen nullterminierten String at <stradr>
 ; push: stradr_lsb, stradr_msb
-; pull: --, --
+; pull: #, #
 ; ********************************************************************************************
 OS_Print:       LDS 4 STA printaddr+0           ; get string pointer LSB
                 LDS 3 STA printaddr+1           ; get string pointer MSB
@@ -344,7 +345,7 @@ OS_Print:       LDS 4 STA printaddr+0           ; get string pointer LSB
 ; ****************************************************
 ; Prints out a byte value <val> in HEX format
 ; push: <val>
-; pull: --
+; pull: #
 ; ****************************************************
 OS_PrintHex:    LDS 3                           ; read value from stack
                 LSR LSR LSR LSR
@@ -719,7 +720,7 @@ SSD_LoadFile:       LDS 4 PHS LDS 4 PHS                                         
 ; ***************************************************************************************
 ; Saves memory area as file <name> to SSD drive, checks if there is enough space
 ; push: nameptr_lsb, nameptr_msb, first_lsb, first_msb, last_lsb, last_msb
-; pull: --, --, --, --, --, ret
+; pull: #, #, #, #, #, ret
 ; success: ret = 1, failure: ret = 0
 ; modifies: OS_Count, PtrA, PtrB, PtrC, PtrD, OS_InpBuf
 ; ***************************************************************************************
@@ -797,7 +798,7 @@ FLASH_Write:      DEW OS_PtrB BCC fw_return                     ; Anzahl runterz
 
 ; ***********************************************************
 ; Returns the address <free> of the first free byte in SSD
-; push: ---, ---
+; push: #, #
 ; pull: free_msb, free_lsb
 ; success: free_msb < 0x80
 ; modifies: PtrC, PtrD
@@ -857,7 +858,7 @@ SSD_FindFile:     ; browse through all stored files and see if <filename> matche
                 'JPS', 'RTS', 'BNE', 'BEQ', 'BCC', 'BCS', 'BPL', 'BMI'
 
   hometxt:       27, '[H', 27, '[H', 27, '[J', 0
-  starttxt:     '| MINIMAL CPU SYSTEM 1.5.2 by C. Herting |', 10
+  starttxt:     '| MINIMAL CPU SYSTEM 1.5.3 by C. Herting |', 10
                 '| 512KB SSD - 32KB RAM - Type m for menu |', 10, 0
 
   menutxt:      10
@@ -879,7 +880,8 @@ SSD_FindFile:     ; browse through all stored files and see if <filename> matche
   freetext:     27, '[21GFREE ', 0
   suretext:     'y/n?', 10, 0
 
-OS_END:                                         ; address of first unused byte after OS code
+OS_Copy_End:                                    ; address of first byte beyond OS code
+
                 #end                            ; VARIABLES USED BY THE OS
 
 #org 0xe000     OS_SSDRAMBuf:                   ; 4KB buffer for 'data to keep' when moving files and erasing SSD blocks
@@ -892,16 +894,13 @@ OS_END:                                         ; address of first unused byte a
 #org 0xfebb     OS_PtrB:                        ; lokaler pointer, Zeiger auf mnemonic input position
 #org 0xfebd     OS_PtrC:                        ; lokaler pointer, reuse as byte line counter & 3-byte-Speicher für mnemonic
 #org 0xfec0     OS_PtrD:                        ; lokaler pointer
-#org 0xfec2     RandomX:                        ; registers of the pseudo-random generator OS_Random
-#org 0xfec3     RandomA:
-#org 0xfec4     RandomB:
-#org 0xfec5     RandomC:
-                                                ; 3 unused bytes for more variables
+#org 0xfec2     OS_RandomState:                 ; 4 bytes (x, a, b, c) state of the pseudo-random generator
+#org 0xfec6     OS_unused:                      ; 3 unused bytes for more variables
 #org 0xfec9     OS_InpBuf:                      ; 55 bytes line input string (also used by FLASH erase monitor)
 
-; -------------------------------------------------------------------------------
+; *******************************************************************************
 ; Copyright (c) 2022 Carsten Herting (slu4)
-; -------------------------------------------------------------------------------
+; *******************************************************************************
 ; MIT LICENSE
 ; Permission is hereby granted, free of charge, to any person obtaining a copy of
 ; this software and associated  documentation files  (the "Software"), to deal in
@@ -918,4 +917,5 @@ OS_END:                                         ; address of first unused byte a
 ; LIABILITY,  WHETHER IN AN ACTION  OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 ; OUT OF OR IN  CONNECTION WITH  THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 ; SOFTWARE.
-; -------------------------------------------------------------------------------
+; *******************************************************************************
+

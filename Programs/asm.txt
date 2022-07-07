@@ -1,9 +1,16 @@
 ; Minimal Assembler for the 'Minimal CPU System'
 ; written by Carsten Herting 22.5.2021 - 29.5.2021
-#org 0xd000   ; Build address
-; #end        ; To build the assembler on the Minimal, uncomment these lines and change the build
-; #org 0xd000 ; address from 0xd000 t0 0xc000. Build with 'd000 r asmsrc ENTER'. Copy the build
-; #begin      ; assembler from 0xc000 to it's target address 0xd000 with 'k c000 cfff d000 ENTER'.
+
+#org 0xd000   ; build address of the assember
+
+; To let this assembler assemble itself natively on the Minimal, do the following: Read through this and the
+; next text block completely. Uncomment the next block. Change the above build address from 0xd000 t0 0xc000.
+; Remove all comments of this source by searching for the REGEX ;([\s\S]*). Remove all trailing SPACES as well.
+
+; #end        ; and transfer the source file over to the Minimal (see 'Native Tool Chain / Text File Transfer'
+; #org 0xd000 ; of the reference manual for more information. Load the assembler and build with
+; #begin      ; 'd000 r <source> ENTER'. Copy the output to it's target address with 'k c000 cfff d000 ENTER'.
+
 Init:         LDI 0xfe STA 0xffff                           ; init stack
               LDI <IntroText PHS LDI >IntroText PHS
               JPS _Print PLS PLS                            ; print the intro message
@@ -30,7 +37,7 @@ PassOne:      LDI '1' OUT JPS _WaitUART
               LDI <labels STA labelend+0                    ; init pointer to label table
               LDI >labels STA labelend+1
               LDA srcptr+0 STA src_lptr+0                   ; init source line pointer
-              LDA srcptr+1 STA src_lptr+1              
+              LDA srcptr+1 STA src_lptr+1
               LDA asmptr+0 STA asm_lptr+0                   ; init destination line pointer
               LDA asmptr+1 STA asm_lptr+1
               CLW Line INW Line                             ; start with line number zero
@@ -57,26 +64,26 @@ PassOne:      LDI '1' OUT JPS _WaitUART
               JPS DecByteToHex
               JPS CutLabelDef     ; call after SingleSpaces, skips over pre-processor statements
               JPS TrimFront       ; call after CutLabelDef
-                INW Line                                         ; move beyond the processed line...
+                INW Line          ; move beyond the processed line...
                 LDI 10 PHS
                 LDA asm_lptr+0 PHS LDA asm_lptr+1 PHS
                 JPS length PLS
                 PLS ADB asm_lptr+1
                 PLS ADW asm_lptr INW asm_lptr
-                JPA p1loop                                              ; ... and look for a next line
+                JPA p1loop        ; ... and look for a next line
 
               ; *******************************************************************************
 
 PassTwo:      LDI '2' OUT JPS _WaitUART
-              LDA asmptr+0 STA asm_lptr+0               ; init destination line pointer
+              LDA asmptr+0 STA asm_lptr+0      ; init destination line pointer
               LDA asmptr+1 STA asm_lptr+1
-              LDI <labels STA labelptr+0                  ; point back to first label found
+              LDI <labels STA labelptr+0       ; point back to first label found
               LDI >labels STA labelptr+1
-              CLW Line INW Line               ; start with line number zero
-              LDI <Default STA PrgCount+0                 ; prg start
+              CLW Line INW Line                ; start with line number zero
+              LDI <Default STA PrgCount+0      ; prg start
               LDI >Default STA PrgCount+1
   p2nextline: LDA labelptr+1
-              CPA labelend+1 BNE validlabel        ; prüfe, ob es noch labels zu tracken gibt
+              CPA labelend+1 BNE validlabel    ; prüfe, ob es noch labels zu tracken gibt
                 LDA labelptr+0
                 CPA labelend+0 BEQ PassThree
   validlabel: CLB num                     ; num: calculate line byte length
@@ -107,7 +114,7 @@ PassTwo:      LDI '2' OUT JPS _WaitUART
               JPS getnext PLS
               PLS STA asm_lptr+1 PLS STA asm_lptr+0
               LDS -2 CPI ' ' BEQ p2nextelem
-              CPI 10 BNE PassThree                              ; last separator kein LF? dann war's 0!
+              CPI 10 BNE PassThree                  ; last separator kein LF? dann war's 0!
                 LDR labelptr CPA Line+0 BNE p2nolabel0
                   INW labelptr LDR labelptr
                   CPA Line+1 BNE p2nolabel1
@@ -120,9 +127,9 @@ PassTwo:      LDI '2' OUT JPS _WaitUART
                     JPS getnext PLS
                     PLS STA labelptr+1 PLS STA labelptr+0
                     JPA p2nolabel0
-  p2nolabel1:     DEW labelptr                                  ; correct
-  p2nolabel0:   LDA num ADW PrgCount                            ; add size for next line
-                INW Line                                  ; goto next line number
+  p2nolabel1:     DEW labelptr                      ; correct
+  p2nolabel0:   LDA num ADW PrgCount                ; add size for next line
+                INW Line                            ; goto next line number
                 JPA p2nextline
 
               ; *******************************************************************************
@@ -141,7 +148,7 @@ PassThree:    LDI '3' OUT JPS _WaitUART
               CPI '<' BNE p3next1
                 LDI 1 JPA p3cutpre
     p3next1:  CPI '>' BNE p3label             ; now it must be a label
-                LDI 2 
+                LDI 2
     p3cutpre:   STA num INW ptra              ; ptra points to the beginning of the actual label without < >
   p3label:    LDI <labels STA labelptr+0                    ; search and replace <label> with LSB/MSB at asm_lptr
               LDI >labels STA labelptr+1
@@ -171,7 +178,7 @@ PassThree:    LDI '3' OUT JPS _WaitUART
                           PLS ADB numc INB numb             ; num = num + digit
     p3dochok:     LDA numa CPI '+' BEQ p3plus               ; folgt in der Referenz ein Offset?
                   CPI '-' BNE p3notok                       ; alles andere => ERROR
-                    NEB numc                                ; negate                           
+                    NEB numc                                ; negate
     p3plus:       LDA numc ADW Line
 
   p3elemterm:     LDA num CPI 3 BNE p3onlyone               ; ptr has reached a valid terminator
@@ -210,11 +217,11 @@ PassThree:    LDI '3' OUT JPS _WaitUART
               PLS STA asm_lptr+1 PLS STA asm_lptr+0
               JPA p3nextelem
 
-PassFour:     LDI '4' OUT JPS _WaitUART                     ; clean out additional spaces behind '#o8000 label:'
+PassFour:     LDI '4' OUT JPS _WaitUART             ; clean out additional spaces behind '#o8000 label:'
               LDA asmptr+0 STA ptr+0
               LDA asmptr+1 STA ptr+1
   p4loop:     LDR ptr CPI 0 BEQ PassFive
-              CPI ' ' BNE p4nospace                         ; cut ' ' before separator ' ', LF, 0
+              CPI ' ' BNE p4nospace                 ; cut ' ' before separator ' ', LF, 0
                 INW ptr LDR ptr
                 CPI ' ' BEQ p4cutspace
                 CPI 10 BEQ p4cutspace
@@ -226,10 +233,10 @@ PassFour:     LDI '4' OUT JPS _WaitUART                     ; clean out addition
                 JPS cutchars PLS PLS PLS PLS
                 JPA p4loop
   p4nospace:  INW ptr JPA p4loop
-              
+
 PassFive:     LDI '5' OUT JPS _WaitUART
-              LDA asmptr+0 STA asm_lptr+0                     ; ASSEMBLING
-              LDA asmptr+1 STA asm_lptr+1                     ; init destination line pointer
+              LDA asmptr+0 STA asm_lptr+0           ; ASSEMBLING
+              LDA asmptr+1 STA asm_lptr+1           ; init destination line pointer
               CLW Line INW Line
               LDI 1 STA DoEmit
               LDI <Default STA _MemAddr+0 STA PrgCount+0
@@ -320,7 +327,7 @@ SetPtrLine:   LDA asm_lptr+0 STA ptr+0
 
 DelComments:  JPS SetPtrLine           ; change semicolon to LF
   step1loop:  LDR ptr CPI 10 BEQ step1ret
-                CPI 59 BEQ itssemi      ; semicolon
+                CPI 59 BEQ itssemi     ; semicolon
                   INW ptr JPA step1loop
   itssemi:    LDI 10 STR ptr
   step1ret:   RTS
@@ -471,7 +478,7 @@ CutLabelDef:  LDR asm_lptr CPI '#' BNE cld_nopre            ; skip over pre-proc
   labeldeflp: LDR ptr CPI 10 BEQ step10ret
                 CPI ':' BEQ founddef
                   INW ptr JPA labeldeflp
-  founddef:   LDA Line+0 STR labelend INW labelend    ; store line number of the label definition
+  founddef:   LDA Line+0 STR labelend INW labelend          ; store line number of the label definition
               LDA Line+1 STR labelend INW labelend
               LDA asm_lptr+1 SBB ptr+1                      ; ptr = length of label without :
               LDA asm_lptr+0 SBW ptr
@@ -525,9 +532,9 @@ DecByteToHex: JPS SetPtrLine
 ; Converts a byte value <val> to HEX chars
 ; push: <val>, #
 ; pull: 1st char, 2nd char
-ByteToHex:      LDS 4 LSR LSR LSR LSR           ; read value from stack
+ByteToHex:      LDS 4 LSR LSR LSR LSR  ; read value from stack
                 ADI '0' CPI 58 BCC GHex8msn
-                  ADI 39                        ; mache einen Buchstaben draus
+                  ADI 39               ; mache einen Buchstaben draus
   GHex8msn:     STS 3
                 LDS 4 LSL LSL LSL LSL LSL
                 ROL ROL ROL ROL
@@ -566,7 +573,7 @@ getnext:        LDS 3 STA str_len+1
 ; The caller ensures that there are at least <n> chars to cut.
 ; push: <n>, <term>, string_lsb, string_msb
 ; pull: #, #, #, #
-cutchars:       LDS 3 STA str_dptr+1 STA str_sptr+1                ; retrieve address of the 1. char to cut
+cutchars:       LDS 3 STA str_dptr+1 STA str_sptr+1   ; retrieve address of the 1. char to cut
                 LDS 4 STA str_dptr+0 STA str_sptr+0
                 LDS 6 ADW str_sptr
   cut_loop:     LDR str_sptr STR str_dptr
@@ -613,7 +620,7 @@ insertplaces:   LDS 3 STA str_sptr+1
 ; push: number_lsb, number_msb
 ; pull: #, #
 ; modifies: str_len, num
-Print999:       LDS 3 STA str_len+1             		; PRINT A POSITIVE NUMBER 000 - 999
+Print999:       LDS 3 STA str_len+1   ; PRINT A POSITIVE NUMBER 000 - 999
                 LDS 4 STA str_len+0
                 LDI '0' STA num
   p100loop:     LDI 100 SBW str_len BCC p99end100
@@ -627,7 +634,7 @@ Print999:       LDS 3 STA str_len+1             		; PRINT A POSITIVE NUMBER 000 
                 LDI 58 ADB str_len+0
                 LDA str_len+0 OUT JPS _WaitUART
                 RTS
-  
+
 #end                          ; variables used by the assembler
 
 srcptr:         0xffff
