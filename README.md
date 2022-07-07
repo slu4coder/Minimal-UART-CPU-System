@@ -1,12 +1,14 @@
-# Minimal UART CPU System - Breadboard REDUX Revision 1.6 Out Now!
+# Minimal UART CPU System - 1.6 Redux Beast Mode Upcoming!
 
-NEW: Build your own 'Minimal CPU System' on breadboards: https://www.youtube.com/watch?v=Gz1VVOsNn_8
+NEW: Minimal CPU 1.6 Redux is now running at up to 8.3MHz. New video upcoming!
 
-NEW: Python-like high-level programming language MIN released: https://www.youtube.com/watch?v=H342TwW4R7k
+● Build your own 'Minimal CPU System' on breadboards: https://www.youtube.com/watch?v=Gz1VVOsNn_8
 
-NEW: 'Minimal VGA Extension Card' released! https://github.com/slu4coder/DIY-VideoRAM/tree/main/KiCAD
+● Python-like high-level programming language MIN released: https://www.youtube.com/watch?v=H342TwW4R7k
 
-NEW: 'Minimal CPU System' Emulator released! See user manual chapter 'Minimal Emulator' for details.
+● 'Minimal VGA Extension Card' released! https://github.com/slu4coder/DIY-VideoRAM/tree/main/KiCAD
+
+● 'Minimal CPU System' Emulator released! See user manual chapter 'Minimal Emulator' for details.
 
 ● Native assembler and text editor released!
 
@@ -41,7 +43,7 @@ WHAT YOU GET:
 
 TECHNICAL SPECIFICATION:
   
-  ● Processing power (approx. 0.5Mips @ 3,6864MHz) comparable to C64 or Apple II
+  ● Processing power (approx. 1.1Mips @8.3MHz) comparable to 2.2 x Commodore 64 or Apple II
   
   ● Clear(est?) and simple(st? – you judge!) design for fun and education
   
@@ -53,11 +55,13 @@ TECHNICAL SPECIFICATION:
   
   ● SSD file system (commands LOAD, SAVE, DIR, DELETE, FORMAT as you'd expect)
   
-  ● UART interface (up to 230.4kbps) for terminal display, keyboard input and file I/O
+  ● UART interface (up to 500kbps) for terminal display, keyboard input and file I/O
+ 
+  ● Expansion port (I/O card and VGA card available, build your own!)
+   
+  ● 24 (16) control signals, 2 registers A and B, ALU (arithmetic and logic unit) = simple adder, 3 flags (negative, carry and zero)
   
-  ● 16 control signals, 2 registers A and B, ALU (arithmetic and logic unit) = simple adder, 3 flags (negative, carry and zero)
-  
-  ● Built from 74HCxx TTL logic on 120mm x 190mm PCB
+  ● Built from 74HCxx TTL logic on 120mm x 190mm PCB or 8 breadboards
   
 
 I hope you find this information useful, educational or otherwise interesting. I'd love to hear about your build, so meet me on YouTube.
