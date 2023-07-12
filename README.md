@@ -6,6 +6,8 @@ NEW: Check out the full 'Minimal 64 Home Computer': https://github.com/slu4coder
 
 NEW: Minimal CPU 1.6 'Redux' is now running in beast mode at up to 8.3MHz.
 
+![redux](https://github.com/slu4coder/Minimal-UART-CPU-System/assets/52576999/acc415e3-ad05-4efc-9c1f-75901d5e7321)
+
 ● Build your own 'Minimal CPU System' on breadboards: https://www.youtube.com/watch?v=Gz1VVOsNn_8
 
 ● Python-like high-level programming language MIN released: https://www.youtube.com/watch?v=H342TwW4R7k
