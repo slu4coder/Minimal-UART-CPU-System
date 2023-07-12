@@ -1,5 +1,7 @@
 # Minimal UART CPU System
 
+![test](https://github.com/slu4coder/Minimal-UART-CPU-System/assets/52576999/0edf149a-9e37-47e4-8fc6-2b422d1a01ea)
+
 NEW: Check out the full 'Minimal 64 Home Computer': https://github.com/slu4coder/The-Minimal-64-Home-Computer
 
 NEW: Minimal CPU 1.6 'Redux' is now running in beast mode at up to 8.3MHz.
