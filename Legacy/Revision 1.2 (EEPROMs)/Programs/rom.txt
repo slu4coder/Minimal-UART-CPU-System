@@ -1,0 +1,407 @@
+; MINOS ROM Version 1.3.0 for the 8-Bit Minimal & Ultimate UART CPU
+; by Carsten Herting - last update 14.01.2021
+
+; CHANGE LOG 1.3.0:
+; 2021_01_10  Merging versions, moving MinOS variables and input buffer to $7f00
+; CHANGE LOG 1.2.0:
+; 2002_12_07  Reworking general purpose routines
+; 2020_12_06  Renaming general purpose routines to OS_...
+; 2020_12_05  Converting to microcode 1.2.0 (improved instruction set)
+; 2020_12_05  Implement parsing of mnemonics
+; 2020_12_04  Improve reset screen
+; 2020_11_28  Optimize NOPs in OS_PrintHexByte function
+
+; CHANGE LOG 1.1.9:
+
+; ********************************************************************************************
+; Memory Monitor like WozMon
+; ********************************************************************************************
+            *=$0000
+memMon:     LDI $fe STA $7fff                   ; stack init (don't change this section because 'flash.txt' relies on it)
+            LDI <welcometxt STS -3	            ; put string address on stack
+            LDI >welcometxt STS -4
+            JPS OS_PrintText
+
+startline:	LDA OS_Address+1 STS -3 JPS OS_PrintHexByte    ; schreibe die aktuelle examine-Adresse
+            LDA OS_Address+0 STS -3 JPS OS_PrintHexByte
+            JPS PrintSpace
+
+            JPS OS_ReadLine                     ; get a line of input until ENTER or end of buffer is hit
+            JPS preset                          ; reset parsing variables and pointers
+            CLB OS_Mode                         ; start with monitor mode = 0
+						
+parsing:    LDR OS_ParsePtr                      ; BYTE-BY-BYTE PARSING OF THE LINE INPUT
+            CPI 'r' BEQ runprg                  ; r => autostart
+            CPI ':' BEQ doppel                  ; : switch to 'deposit' mode
+            CPI '.' BEQ punkt                   ; . switch to 'list' mode                    
+						CPI 'a' BCS sletter                 ; a..f for hex numbers
+            CPI 'A' BCS bletter		              ; A..Z for mnemonics letters
+            CPI '0' BCS zahl                    ; 0..9 for hex numbers
+	            LDA OS_ParseNum+2                 ; interpretiere Zeichen als GO! according to mode (hier ' ' oder ENTER)
+              CPI 0 BEQ validdata               ; prüfe, ob überhaupt valide parse-Daten vorliegen
+								LDA OS_PtrB+0           				; KEINE VALIDEN DATEN!
+								CPI <OS_PtrC           				; prüfe ob ein unvollständiger mnemonic vorliegt
+								BEQ nohalfinp
+									JPS PrintError        				; schreibe ? für mnemonic-Fehler
+	nohalfinp:      JPA clrparsed
+
+runprg:				INB OS_ParsePtr
+              JPR OS_Address                  ; r => jumps immediately to OS_Address
+doppel:       LDI 1 JPA setmode               ; : => umschalten auf DEPOSIT OS_Mode=1
+punkt:          LDI 2                         ; . => umschalten auf LIST OS_Mode
+	setmode:	  STA OS_Mode
+              LDA OS_ParseNum+2               ; validen input vorhergehend . oder : als 'OS_Address' übernehmen
+              CPI 0 BNE clrparsed             ; liegt valider input vor?
+  setmemadr:    LDA OS_ParseNum STA OS_Address      ; validen Daten -> OS_Address
+                LDA OS_ParseNum+1 STA OS_Address+1
+                JPA clrparsed									; . : kam ohne valide Addresse davor
+bletter:    STR OS_PtrB                       ; Gross-Zeichen X speichern
+            LDI $f0 STA OS_ParseNum+2         ; jede Eingabe X entwertet OS_ParseNum, da es Teil eines ungeprüften mnemonics ist
+            INB OS_PtrB+0
+            CPI <OS_Buffer                    ; Ende von buffer erreicht? (geht auch <meminp+3)
+            BCC parsed                        ; noch nicht -> erstmal ist alles getan
+              CLW OS_ParseNum                 ; XXX input vorhanden, opcode-Zähler rücksetzen
+              LDI <OS_PtrC STA OS_PtrB+0      ; set OS_PtrB schon wieder auf Empfang
+fitsuchen:    LDI <mnemonics STA OS_PtrB+0    ; pointer to start of table
+              LDI >mnemonics STA OS_PtrB+1
+              LDA OS_ParseNum ADW OS_PtrB
+              LDA OS_ParseNum ADW OS_PtrB
+              LDA OS_ParseNum ADW OS_PtrB
+              LDA OS_PtrC+0                   ; Abgleich 1. letter
+              CPR OS_PtrB
+              BNE opnotfit
+                INW OS_PtrB
+                LDA OS_PtrC+1                 ; Abgleich 2. letter
+                CPR OS_PtrB
+                BNE opnotfit
+                  INW OS_PtrB
+                  LDA OS_PtrC+2               ; Abgleich 3. letter
+                  CPR OS_PtrB
+                  BEQ opfits
+opnotfit:           INB OS_ParseNum           ; teste nächsten mnemonic
+                    CPI 64                    ; alle opcodes durchgeschaut?
+                    BCC fitsuchen
+                      JPS PrintError
+                      JPA clrparsed           ; opcode war nicht dabei -> parse-Daten verwerfen
+opfits:       CLB OS_ParseNum+2               ; validate parsed number by hand
+              JPA parsed
+sletter:    SBI 39                            ; parse one byte normal hex input
+zahl:       SBI 48
+            PHS
+            LDI 4 STA OS_Count                ; shift existing hex data to the left
+shiftloop:    LDA OS_ParseNum+0 LSL STA OS_ParseNum+0
+              LDA OS_ParseNum+1 ROL STA OS_ParseNum+1
+              LDA OS_ParseNum+2 ROL STA OS_ParseNum+2   ; this automatically validates a parsed number
+            DEB OS_Count
+            BNE shiftloop
+              PLS ADB OS_ParseNum               ; add new hex nibble to the right
+              JPA parsed
+
+clrparsed:  JPS preset                          ; ENDE DES PARSINGS (AUCH MEHRERER BYTES)
+
+parsed:     LDR OS_ParsePtr                     ; ENDE DES PARSINGS EINES BYTES
+            CPI 10                              ; prüfe hier NOCHMAL auf ENTER wg. Zeilenende
+            BEQ startline                       ; Zeilenende -> warten auf eine neue Zeile
+              INB OS_ParsePtr                   ; gehe zum nächsten Zeichen des Puffers
+              BMI memMon                        ; Zeile zu lang? -> RESET
+                JPA parsing                     ; nächstes byte aus input parsen
+preset:     CLW OS_ParseNum                     ; clear parsed number
+            LDI $f0 STA OS_ParseNum+2           ; invalidate parsed number
+            LDI <OS_PtrC STA OS_PtrB+0          ; reset pointer to start of mnemonic input string
+            LDI >OS_PtrC STA OS_PtrB+1
+            RTS
+
+validdata:      LDA OS_Mode                     ; ***** ES LIEGT EIN VALIDES PARSE-DATUM VOR *****
+                DEC
+                BCC setmemadr                   ; OS_Mode=0 -> übernimm Daten als einfache neue OS_Address
+                BEQ mode_deposit                ; OS_Mode=1 -> übernimm Daten als 'deposit'
+mode_list:      LDA OS_Address+0 STA OS_PtrA+0  ; OS_Mode=2 -> Daten sind "list until", print list
+                LDA OS_Address+1 STA OS_PtrA+1  ; kopiere OS_Address zum Benutzen
+startlistpage:  LDI 24 STA OS_PtrC              ; reuse as line counter
+startlistline:  LDI 8 STA OS_Count              ; init: 8 bytes pro Zeile
+                LDA OS_PtrA+1 STS -3 JPS OS_PrintHexByte  ; Drucke aktuelle list-Adresse
+                LDA OS_PtrA+0 STS -3 JPS OS_PrintHexByte
+                JPS PrintSpace
+nextlist:       LDR OS_PtrA STS -3
+                JPS OS_PrintHexByte             ; Speicherinhalt drucken
+                JPS PrintSpace
+                LDA OS_PtrA+0
+                CPA OS_ParseNum+0
+                BNE listweiter
+                  LDA OS_PtrA+1
+                  CPA OS_ParseNum+1
+                  BNE listweiter  
+                    JPS PrintEnter              ; die Liste wurde vollständig gedruckt
+                    JPA clrparsed
+listweiter:     INW OS_PtrA
+                DEB OS_Count
+                BNE nextlist
+                  JPS PrintEnter
+                  DEB OS_PtrC                   ; reuse as line counter
+                  BNE startlistline
+                    WIN
+                    CPI 'q' BNE startlistpage   ; warte auf Tastendruck
+                    JPA clrparsed
+mode_deposit: LDA OS_ParseNum                   ; validen Daten -> deposit
+              STR OS_Address
+              INW OS_Address                          
+              JPA clrparsed
+
+
+              *=$01e0
+
+; **********************************
+; Subroutines printing helpful stuff
+; **********************************
+PrintSpace:     LDI ' ' JPA printchar
+PrintError:     LDI '?' OUT JPS OS_WaitUART
+PrintEnter:     LDI 10
+  printchar:    OUT JPS OS_WaitUART
+								RTS
+              
+; ********************************************************************************************
+; Reading in keyboard input into OS_Buffer until [ENTER] or end of buffer is hit
+; ********************************************************************************************
+OS_ReadLine:  JPS readexit                          ; resets the LSB of OS_ParsePtr
+  readchar:   WIN                                   ; >= 10... waiting for input other than 0
+              OUT                                   ; 4 output without sleeping, since the maximum receive rate is 115,2kHz anyway
+              STR OS_ParsePtr                       ; 10
+              CPI 10 BEQ readexit                   ; 10 teste auf ENTER & BACKSPACE
+              BCS nobackspace                       ; 6(5) ... backspace wäre "8"
+                DEB OS_ParsePtr                     ; 10 BACKSPACE war's
+                CPI <OS_Buffer                      ; 5
+                BCS readchar                        ; 6(5)
+                  NOP NOP NOP NOP NOP NOP NOP       ; 112
+                  LDI 32 OUT                        ; 8 backspace kompensieren (siehe auch nä. Zeile), JPS OS_WaitUART ist nicht nötig
+  nobackspace:  INB OS_ParsePtr                     ; 10 kompensiert auch den line pointer
+                BPL readchar                        ; 6(5) maximale Anzahl von Zeichen wurde eingelesen
+  readexit:       LDI >OS_Buffer STA OS_ParsePtr+1  ; 12 reset the line pointer
+                  LDI <OS_Buffer STA OS_ParsePtr+0  ; 12                 
+                  NOP NOP NOP NOP NOP NOP           ; 96
+                  RTS                               ; 14
+
+; ********************************************************************************************
+; Parses hex number $0-$ffff from OS_ParsePtr into OS_ParseNum
+; A valid number was parsed if OS_ParseNum+2 contains $00, otherwise $f0
+; ********************************************************************************************
+OS_ParseHexNum: CLW OS_ParseNum+0
+                JPS pninvalidate
+  pnreadchar:   LDR OS_ParsePtr                 ; input buffer lesen
+                CPI 10 BEQ pnreturn             ; ENTER? -> immer zurück (wenn noch nichts da mit Fehler)
+                CPI 'g' BCS pninvalidate        ; above f? -> melde Fehler!
+                CPI 'a' BCS pnletter            ; a...f?
+                CPI ':' BCS pnnotnum            ; above 9? -> Separator: Zurück, wenn was da ist, sonst übergehen.
+                CPI '0' BCS pnzahl              ; 0...9?
+                  JPA pnnotnum                  ; unter 0? -> Separator: Zurück, wenn was da ist, sonst übergehen.
+  pnletter:     SBI 39                          ; parse one byte normal hex input, a = 10
+  pnzahl:       SBI 48
+                STS 0                           ; gelesenen Wert zwischenspeichern
+                LDI 4 STA OS_Count              ; shift existing hex data 4 steps to the left
+  pnshiftloop:  LDA OS_ParseNum+0 LSL STA OS_ParseNum+0
+                LDA OS_ParseNum+1 ROL STA OS_ParseNum+1
+                LDA OS_ParseNum+2 ROL STA OS_ParseNum+2
+                DEB OS_Count BNE pnshiftloop
+                  LDS 0 ADB OS_ParseNum+0       ; add new hex nibble (carry cannot happen)
+                  JPA pnnext
+  pnnotnum:     LDA OS_ParseNum+2               ; haben wir noch nix?
+                CPI $f0 BNE pnreturn            ; dann weitermachen, sonst zurück mit Wert
+  pnnext:         INB OS_ParsePtr               ; move along the input buffer
+                  BCC pnreadchar                ; read more if buffer end was NOT reached
+  pninvalidate: LDI $f0 STA OS_ParseNum+2       ; place "not successful" in upper nibble (will be shifted during parsing)
+  pnreturn:     RTS
+  
+; ********************************************************************************************							
+; Schreibt einen nullterminierten String
+; ********************************************************************************************							
+OS_PrintText: LDS -1 STA OS_PtrA+0
+            	LDS -2 STA OS_PtrA+1 	         	  ; get LSB and MSB
+  printloop:  LDR OS_PtrA CPI 0	    	          ; 15 Print routine
+							BEQ printend          		        ; 5(6) string zuende?
+            	  OUT NOP NOP NOP NOP NOP NOP NOP NOP ; 132
+        		    INW OS_PtrA         		        ; 12 zeige auf das nächste Zeichen
+     		        JPA printloop                   ; 6
+  printend:	  RTS
+
+; ********************************************************************************************							
+; Subroutine printing out a byte as an 8-bit hex value (ATTENTION: It mustn't use subroutine calls!)
+; ********************************************************************************************							
+OS_PrintHexByte: 	LDS -1                          ; caller deposits value on stack with STS -3
+                  LSR LSR LSR LSR								
+                  ADI '0'
+                  CPI 58
+                  BCC Hex8msn
+                    ADI 39                        ; mache einen Buchstaben draus
+  Hex8msn:				OUT NOP NOP NOP NOP             ; min. 160 cycles bis zum nächsten UART send
+                  LDS -1
+                  LSL LSL LSL LSL
+                  LSR LSR LSR LSR
+                  ADI '0'
+                  CPI 58
+                  BCC Hex8lsn
+                    ADI 39
+  Hex8lsn:				OUT NOP NOP NOP NOP NOP NOP NOP NOP NOP   ; min 160 cycles (optimized)
+                  RTS
+
+; ********************************************************************************************							
+; Waits for a UART transmission to complete, Ziel: min. 160 cycles
+; 8*16 + 30 + 4 = 162 inkl. calling OUT
+; ********************************************************************************************							
+OS_WaitUART:    NOP NOP NOP NOP NOP NOP NOP NOP
+                RTS
+
+              *=$0300
+; ****************************************************
+; Memory filler copies byte value into block of memory
+; ****************************************************
+              JPS OS_ParseHexNum
+              LDR OS_ParsePtr CPI 10 BEQ mferror               ; wurde zu früh ENTER gedrückt?
+              LDA OS_ParseNum+2 CPI 0 BNE mferror             ; wurde eine Zahl eingelesen?
+                LDA OS_ParseNum+1 STA OS_PtrA+1 LDA OS_ParseNum+0 STA OS_PtrA+0 ; copy "from"
+                JPS OS_ParseHexNum
+                LDR OS_ParsePtr CPI 10 BEQ mferror             ; Test wie oben
+                LDA OS_ParseNum+2 CPI 0 BNE mferror
+                  LDA OS_ParseNum+1 STA OS_PtrB+1 LDA OS_ParseNum+0 STA OS_PtrB+0    ; copy "to"
+                  JPS OS_ParseHexNum
+                  LDA OS_ParseNum+2 CPI 0 BNE mferror         ; Test wie oben
+mfnext:             LDA OS_ParseNum+0 STR OS_PtrA             ; BESCHREIBE DEN SPEICHER
+                    LDA OS_PtrA+0
+                    CPA OS_PtrB+0
+                    BNE mfweiter
+                      LDA OS_PtrA+1
+                      CPA OS_PtrB+1
+                      BEQ mfokay
+mfweiter:               INW OS_PtrA
+                        JPA mfnext
+mferror:        JPS PrintError        
+mfokay:         JPA startline
+
+              *=$0380
+; *****************************
+; Memory block copy A..B -> C..
+; *****************************
+              JPS OS_ParseHexNum
+              LDR OS_ParsePtr CPI 10 BEQ mferror               ; wurde zu früh ENTER gedrückt?
+                LDA OS_ParseNum+2 CPI 0 BNE mferror           ; wurde eine Zahl eingelesen?
+                  LDA OS_ParseNum+1 STA OS_PtrA+1 LDA OS_ParseNum+0 STA OS_PtrA+0    ; copy source first -> A
+              JPS OS_ParseHexNum
+              LDR OS_ParsePtr CPI 10 BEQ mferror             ; Test wie oben
+                LDA OS_ParseNum+2 CPI 0 BNE mferror
+                  LDA OS_ParseNum+1 STA OS_PtrB+1 LDA OS_ParseNum+0 STA OS_PtrB+0    ; copy source last -> B
+                  JPS OS_ParseHexNum
+                  LDA OS_ParseNum+2 CPI 0 BNE mferror       ; Test wie oben
+                  LDA OS_ParseNum+1 STA OS_PtrC+1 LDA OS_ParseNum+0 STA OS_PtrC+0    ; copy destination -> C
+mcnext:             LDR OS_PtrA STR OS_PtrC									; copy from -> to
+										LDA OS_PtrB+0 CPA OS_PtrA+0
+                    BNE mcweiter
+                      LDA OS_PtrB+1 CPA OS_PtrA+1
+                      BEQ mfokay														; Zeige okay
+mcweiter:               INW OS_PtrA INW OS_PtrC
+												JPA mcnext
+
+              *=$0400
+; ************************
+; ***** Disassembler *****
+; ************************
+              JPS OS_ParseHexNum
+              LDA OS_ParseNum+2 CPI 0 BNE mferror             ; wurde eine Zahl eingelesen?
+                LDA OS_ParseNum+1 STA OS_PtrA+1 LDA OS_ParseNum+0 STA OS_PtrA+0 ; copy "start"
+
+                LDI >mnemonics STA OS_PtrB+1              ; MSB of mnemonic / length table remains unchanged
+                
+  disstartpage: LDI 24 STA OS_Count
+  disnextline:  LDA OS_PtrA+1 STS -3 JPS OS_PrintHexByte  ; Drucke aktuelle list-Adresse
+                LDA OS_PtrA+0 STS -3 JPS OS_PrintHexByte
+                JPS PrintSpace
+  
+                LDR OS_PtrA
+                CPI $40
+                BCC disinstruct
+                  LDI '?' OUT JPS OS_WaitUART
+                  JPA finishline
+  disinstruct:  LSL ADR OS_PtrA STA OS_PtrB+0                   ; PRINT INSTRUCTION
+                LDR OS_PtrB OUT JPS OS_WaitUART INB OS_PtrB+0   ; output the XXX mnemonic
+                LDR OS_PtrB OUT JPS OS_WaitUART INB OS_PtrB+0
+                LDR OS_PtrB OUT JPS OS_WaitUART
+                JPS PrintSpace
+                
+                LDR OS_PtrA ADI $c0 STA OS_PtrB+0
+                LDR OS_PtrB                              ; retrieve length of operand
+                CPI 0 BEQ finishline
+                CPI -1 BEQ disminus
+                CPI 1 BEQ disone
+  distwo:         LDI 2 ADW OS_PtrA
+                  LDR OS_PtrA STS -3 JPS OS_PrintHexByte
+                  DEW OS_PtrA
+                  LDR OS_PtrA STS -3 JPS OS_PrintHexByte
+                  INW OS_PtrA
+                  JPA finishline
+  disminus:       INW OS_PtrA
+                  LDI '-' OUT JPS OS_WaitUART
+                  LDR OS_PtrA NEG STS -3 JPS OS_PrintHexByte
+                  JPS finishline  
+  disone:         INW OS_PtrA
+                  LDR OS_PtrA STS -3 JPS OS_PrintHexByte
+  finishline:   INW OS_PtrA
+                JPS PrintEnter
+                DEB OS_Count
+                BNE disnextline
+                  WIN
+                  CPI 'q' BNE disstartpage       ; warte auf Tastendruck
+                  JPA startline
+
+
+                *=$0500 
+mnemonics:	    "NOP", "WIN", "OUT", "CLC", "SEC", "LSL", "ROL", "LSR", "ROR", "ASR", "INP", "NEG", "INC", "DEC"
+                "LDI", "ADI", "SBI", "CPI", "ACI", "SCI"
+                "JPA", "LDA", "STA", "ADA", "SBA", "CPA", "ACA", "SCA"
+                "JPR", "LDR", "STR", "ADR", "SBR", "CPR", "ACR", "SCR"
+                "CLB", "NEB", "INB", "DEB", "ADB", "SBB", "ACB", "SCB"
+                "CLW", "NEW", "INW", "DEW", "ADW", "SBW", "ACW", "SCW"
+                "LDS", "STS", "PHS", "PLS", "JPS", "RTS"
+                "BNE", "BEQ", "BCC", "BCS", "BPL", "BMI"
+                
+                *=$05c0
+oplength:       0,0,0,0,0,0,0,0,0,0,0,0,0,0   ; operator byte length
+                1,1,1,1,1,1
+                2,2,2,2,2,2,2,2
+                2,2,2,2,2,2,2,2
+                2,2,2,2,2,2,2,2
+                2,2,2,2,2,2,2,2
+                -1,-1,0,0,2,0
+                2,2,2,2,2,2
+								
+                *=$0600
+welcometxt: 	  27, "[H", 27, "[H", 27, "[J", "***** MINIMAL UART CPU MinOS 1.3.0 *****", 10, 10
+                "MEMORY LAYOUT:", 10
+                " 0000 - 1fff  ROM   | 2000 - 7fff  RAM", 10
+                " 7f00 - 7fff  Stack | 8000 - ffff  UART", 10, 10
+
+                "COMMANDS:", 10
+                " x[xxx]       Set hex address A", 10
+                " [A].B        Print RAM A..B (q quits)", 10
+                " :C[ D ..]    Deposit C [D ..] at A..", 10
+                " r            Run program at A", 10, 10
+                "PROGRAMS:", 10
+                " 300 r A B C  Fill A..B with C", 10
+                " 380 r A B C  Copy A..B to C", 10
+                " 400 r A      Disassemble A.. (q quits)", 10
+                " 800 r        64-Bit Calculator", 10
+                " 1400 r       Minimal Pong", 10
+                " 16e0 r       Minimal Tetris", 10
+                10, 0
+
+                #end
+                
+*=$7f00   OS_Address:                           ; CURRENT ADDRESS IN MEMMON (16 bytes von MINOS am unteren Ende des Stack)
+*=$7f02   OS_ParsePtr:                          ; Zeiger auf das letzte eingelesene Zeichen (to be reset at startup)
+*=$7f04   OS_ParseNum:                          ; 3-byte storage for a parsed 16-bit number, MSB: f0=invalid, 0=valid
+*=$7f07   OS_Mode:                              ; byte 0: normal, 1: deposit, 2: list
+*=$7f08   OS_Count:                             ; lokaler byte counter
+*=$7f09   OS_PtrA:                              ; lokaler pointer
+*=$7f0b   OS_PtrB:                              ; lokaler pointer, Zeiger auf mnemonic input position                          ; 
+*=$7f0d   OS_PtrC:                              ; lokaler pointer, reuse as byte line counter & 3-byte Stringspeicher für eingelesenen mnemonic
+*=$7f10   OS_Buffer:                            ; MEMMON line buffer (112 bytes)
+   
+								#begin
+                
+								*=$0000                         ; set PC to reset vector
