@@ -1,0 +1,35 @@
+def sub0()
+  x = 100
+
+def sub1()
+  print "sub1\n"
+  y=0
+  while y<10
+    y=y+1
+    if y==5 break
+    x=0
+    while x<10
+      x=x+1
+      sub0(	)
+      if x==5 break
+      z=0
+      while z<10
+        z=z+1
+        if z==5 break
+        if z==5 return
+        print x*y*z, " "
+    print "\n"
+
+def sub2( )
+  print "sub2\n"
+  sub1()
+# 	print x, y, z
+
+def sub3()
+  print "sub3\n"
+  sub2()
+
+print "SUB TEST\n"
+sub3()
+# print x, y, z
+print "END\n"

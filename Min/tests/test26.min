@@ -1,0 +1,14 @@
+def test()
+  y = 100               # local variable    stored as y@1
+  print x               # global variable 
+
+x = 1                   # global variable   stored as x
+if x == 1
+  y = 0                 # local variable    stored as y@0
+  while y<10
+    y = y + 1
+    a = 10              # local variable    stored as a@0 only inside while
+    test()
+    print y
+
+  print a               # a is undefined!

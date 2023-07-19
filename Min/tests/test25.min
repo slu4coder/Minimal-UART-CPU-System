@@ -1,0 +1,6 @@
+def add_this(a, b, &c)
+  r = a + b + c
+  return r
+
+x = 100
+print add_this(1, 10, x)

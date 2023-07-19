@@ -1,0 +1,34 @@
+def text()
+  print "Okay!"
+  return
+  print "What!??"
+
+def demo()                    # do some commenting
+
+  a = "MATH Expressions "
+  b = (10 + 1*2 + (4 + 5)*2 )*3 - int("111")
+  print "Test " + a + str(b), "\n"
+
+  if 0 or 5 > -2 or 0 print "True\n"
+  else print "False\n"
+
+  x=0
+  while x<20 x=x+1 print ":"
+
+  x=0
+  while x < 20
+
+    x=x+1
+
+    if x == 5 text()
+    if x == 7 print "Ready." return
+    if not x <15 break
+    print "."
+
+print "Hello, World!\n"     # program entry point
+
+demo()
+text()
+
+print "END\n"
+
