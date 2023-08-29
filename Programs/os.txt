@@ -459,7 +459,7 @@ OS_MemMove:   LDS 3 STA OS_PtrB+1 LDS 4 STA OS_PtrB+0   ; number of bytes
               INW OS_PtrA INW OS_PtrC
               DEW OS_PtrB BCS c_less_a
                 RTS
-  a_less_c:   LDA OS_PtrB+1 ADB OS_PtrA+1 ADB OS_PtrC+1
+  a_less_c:   LDA OS_PtrB+1 ADB OS_PtrA+1 LDA OS_PtrB+1 ADB OS_PtrC+1
               LDA OS_PtrB+0 ADW OS_PtrA LDA OS_PtrB+0 ADW OS_PtrC
     alc_loop: LDR OS_PtrA STR OS_PtrC
               DEW OS_PtrA DEW OS_PtrC
