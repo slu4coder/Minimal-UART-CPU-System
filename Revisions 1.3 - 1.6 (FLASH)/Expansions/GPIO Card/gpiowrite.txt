@@ -1,0 +1,31 @@
+; control digital outputs of the GPIO Expansion Card with the Minimal CPU System
+
+#org 0x8000
+
+					LDI 0xfe STA 0xffff
+
+loop:     LDI 1 STA 0xdff0
+					JPS sleep
+					LDI 2 STA 0xdff0
+					JPS sleep
+					LDI 4 STA 0xdff0
+					JPS sleep
+					LDI 8 STA 0xdff0
+					JPS sleep
+					LDI 4 STA 0xdff0
+					JPS sleep
+					LDI 2 STA 0xdff0
+					JPS sleep
+					JPA loop
+
+sleep:    LDI 0
+ sloop:		NOP NOP NOP NOP NOP NOP NOP NOP NOP NOP
+					NOP NOP NOP NOP NOP NOP NOP NOP NOP NOP
+					NOP NOP NOP NOP NOP NOP NOP NOP NOP NOP
+					NOP NOP NOP NOP NOP NOP NOP NOP NOP NOP
+					NOP NOP NOP NOP NOP NOP NOP NOP NOP NOP
+					NOP NOP NOP NOP NOP NOP NOP NOP NOP NOP
+					INC BCC sloop
+            RTS
+
+;#org 0x8000

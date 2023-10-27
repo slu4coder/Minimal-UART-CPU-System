@@ -1,0 +1,921 @@
+; ********************************************************************************
+; *****                                                                      *****
+; ***** MinOS 1.5.3 for the 8-Bit Minimal Computer System Revision 1.3 - 1.6 *****
+; *****                                                                      *****
+; *****        written by Carsten Herting - last update Jul 7th 2022         *****
+; *****                                                                      *****
+; ********************************************************************************
+; Usage for in-situ programming: Open command shell, type 'asm os.txt',
+; set monitor to address 0xe000 and upload by pasting into the terminal,
+; load prom, type 8000 r, confirm with 'y' and enjoy your updated OS.
+
+; **************************************************************************
+; Creates a file header for a non-deletable OS image and copies the OS image
+; **************************************************************************
+#org 0x0000
+                  0                                            ; = NOP, mimics a non-deletable empty filename
+                LDI <OS_Copy_Start STA 0xfffc CLB 0xfffd       ; prepare OS image address at 0xfffc/d
+                CLB 0xfffe LDI 0xf0 STA 0xffff                 ; prepare OS target address at 0xfffe/f
+                JPA imcopyloop                                 ; jump over file header stuff
+                  0xf000, 0x0fe8                               ; file header stuff (startadr and bytesize, OS uses 4KB)
+  imcopyloop:   LDR 0xfffc STR 0xfffe                          ; copy the OS image to RAM
+                INW 0xfffc INW 0xfffe
+                LDA 0xfffe CPI <OS_Copy_End BNE imcopyloop
+                  LDA 0xffff CPI >OS_Copy_End BCC imcopyloop   ; has all the OS code been copied?
+
+; ************************
+; START OF THE MINOS IMAGE
+; ************************
+OS_Copy_Start:                                                 ; OS image starts HERE
+
+  #end                                                         ; do not emit origin address...
+  #org 0xf000                                                  ; ... but assemble for this destination 
+  #begin                                                       ; begin emitting code here
+
+  _Start:       JPA OS_Start                                   ; MINOS JUMP/POINTER TABLE
+  _Prompt:      JPA OS_Prompt
+  _Print:       JPA OS_Print
+  _PrintHex:    JPA OS_PrintHex
+  _WaitUART:    JPA OS_WaitUART
+  _LoadFile:    JPA SSD_LoadFile
+  _SaveFile:    JPA SSD_SaveFile
+  _MemMove:     JPA OS_MemMove
+  _FindFile:    JPA SSD_FindFile
+  _Mnemonics:   mnemonics                                      ; pointer to ordered mnemonics list
+                0xffff                                         ; unused pointer
+  _HexToWord:   JPA HexToWord
+  _CursorX:     JPA OS_CursorX
+  _CursorY:     JPA OS_CursorY
+  _Random:      JPA OS_Random
+  _XOR:         JPA OS_XOR
+
+  OS_Start:     LDI 0xfe STA 0xffff                            ; stack init
+
+                LDI <hometxt PHS LDI >hometxt PHS              ; print the OS splash screen
+                JPS OS_Print PLS PLS
+                JPS OS_DrawLine JPS OS_PrintEnter
+                LDI <starttxt PHS LDI >starttxt PHS
+                JPS OS_Print PLS PLS
+                JPS OS_DrawLine JPS OS_PrintEnter
+
+  OS_Prompt:    LDA OS_MemAddr+1 PHS JPS OS_PrintHex PLS       ; schreibe die aktuelle examine-Adresse
+                LDA OS_MemAddr+0 PHS JPS OS_PrintHex PLS
+                JPS OS_PrintSpace
+                JPS OS_ReadLine                     ; get a line of input until ENTER or end of input buffer
+                JPS presetparse                     ; reset parsed number and mnemonic input
+                CLB OS_Mode                         ; monitor mode = 0
+  parsing:      LDR OS_ParsePtr                     ; BYTE-BY-BYTE PARSING OF THE LINE INPUT BUFFER
+                CPI 'l' BEQ OS_LoadFile             ; COMMANDS
+                CPI 's' BEQ OS_SaveFile
+                CPI 'z' BEQ OS_ZapFile
+                CPI 't' BEQ OS_DirTable
+                CPI 'w' BEQ OS_WipeSSD
+                CPI 'i' BEQ OS_Disasm
+                CPI 'v' BEQ OS_HexFill
+                CPI 'k' BEQ OS_HexCopy
+                CPI 'n' BEQ OS_Bank
+                CPI 'm' BEQ OS_Menu
+                CPI 'r' BEQ OS_Run
+                CPI ':' BEQ doppel                  ; : switch to 'deposit' mode
+                CPI '.' BEQ punkt                   ; . switch to 'list' mode
+                CPI 'a' BCS sletter                 ; a..f for hex numbers
+                CPI 'A' BCS bletter                 ; A..Z for letters
+                CPI '0' BCS zahl                    ; 0..9 for numbers
+                  LDA OS_ParseNum+2                 ; interpretiere Zeichen als GO! according to mode (hier ' ' oder ENTER)
+                  CPI 0 BEQ validdata               ; prüfe, ob überhaupt valide parse-Daten vorliegen
+                    LDA OS_PtrB+0                   ; KEINE VALIDEN DATEN!
+                    CPI <OS_PtrC                     ; prüfe ob ein unvollständiger mnemonic vorliegt
+                    BEQ nohalfinp
+                      JPS OS_PrintError              ; schreibe ? für mnemonic-Fehler
+  nohalfinp:          JPA clrparsed
+  OS_Menu:      LDI <menutxt PHS LDI >menutxt PHS
+                JPS OS_Print PLS PLS
+                JPA OS_Prompt
+  OS_Run:       INB OS_ParsePtr
+                JPR OS_MemAddr                      ; r => jumps immediately to OS_MemAddr
+  doppel:       LDI 1 JPA setmode                   ; : => umschalten auf DEPOSIT OS_Mode=1
+  punkt:          LDI 2                             ; . => umschalten auf LIST OS_Mode
+    setmode:    STA OS_Mode
+                LDA OS_ParseNum+2                   ; validen input vorhergehend . oder : als 'OS_MemAddr' übernehmen
+                CPI 0 BNE clrparsed                 ; liegt valider input vor?
+    setmemadr:    LDA OS_ParseNum STA OS_MemAddr    ; validen Daten -> OS_MemAddr
+                  LDA OS_ParseNum+1 STA OS_MemAddr+1
+                  JPA clrparsed                      ; . : kam ohne valide Addresse davor
+  bletter:      STR OS_PtrB                         ; Gross-Zeichen X speichern
+                LDI 0xf0 STA OS_ParseNum+2           ; jede Eingabe X entwertet OS_ParseNum, da Teil einer ungeprüften Instr.
+                INB OS_PtrB+0
+                CPI <OS_PtrD                        ; Ende erreicht? (<OS_PtrC + 3 geht leider nicht)
+                BCC parsed                          ; noch nicht -> erstmal ist alles getan
+                  CLW OS_ParseNum                   ; XXX input vorhanden, opcode-Zähler rücksetzen
+                  LDI <OS_PtrC STA OS_PtrB+0        ; set OS_PtrB schon wieder auf Empfang
+  fitsuchen:      LDI <mnemonics STA OS_PtrB+0      ; pointer to start of table
+                  LDI >mnemonics STA OS_PtrB+1
+                  LDA OS_ParseNum ADW OS_PtrB
+                  LDA OS_ParseNum ADW OS_PtrB
+                  LDA OS_ParseNum ADW OS_PtrB
+                  LDA OS_PtrC+0                     ; Abgleich 1. letter
+                  CPR OS_PtrB
+                  BNE opnotfit
+                    INW OS_PtrB
+                    LDA OS_PtrC+1                   ; Abgleich 2. letter
+                    CPR OS_PtrB
+                    BNE opnotfit
+                      INW OS_PtrB
+                      LDA OS_PtrC+2                 ; Abgleich 3. letter
+                      CPR OS_PtrB
+                      BEQ opfits
+    opnotfit:           INB OS_ParseNum             ; teste nächsten mnemonic
+                        CPI 64                      ; alle opcodes durchgeschaut?
+                        BCC fitsuchen
+                          JPS OS_PrintError
+                          JPA clrparsed             ; opcode war nicht dabei -> parse-Daten verwerfen
+    opfits:       CLB OS_ParseNum+2                 ; validate parsed number by hand
+                  JPA parsed
+    sletter:    SBI 39                              ; parse one byte normal hex input
+    zahl:       SBI 48
+                PHS
+                LDI 4 STA OS_Count                  ; shift existing hex data to the left
+    shiftloop:    LDA OS_ParseNum+0 LSL STA OS_ParseNum+0
+                  LDA OS_ParseNum+1 ROL STA OS_ParseNum+1
+                  LDA OS_ParseNum+2 ROL STA OS_ParseNum+2   ; this automatically validates a parsed number
+                DEB OS_Count
+                BNE shiftloop
+                  PLS ADB OS_ParseNum               ; add new hex nibble to the right
+                  JPA parsed
+  clrparsed:    JPS presetparse                     ; ***** ENDE DES PARSINGS (AUCH MEHRERER BYTES) *****
+  parsed:       LDR OS_ParsePtr                     ; ENDE DES PARSINGS EINES BYTES
+                CPI 10                              ; prüfe hier NOCHMAL auf ENTER wg. Zeilenende
+                BEQ OS_Prompt                       ; Zeilenende -> warten auf eine neue Zeile
+                  INB OS_ParsePtr                   ; gehe zum nächsten Zeichen des Puffers
+                  BCS OS_ErrorPrompt                ; Zeile zu lang? -> ERROR
+                    JPA parsing                     ; nächstes byte aus input parsen
+  presetparse:  CLW OS_ParseNum                     ; clear parsed number
+                LDI 0xf0 STA OS_ParseNum+2          ; invalidate parsed number
+                LDI <OS_PtrC STA OS_PtrB+0          ; reset OS_PtrB to start of mnemonic input buffer
+                LDI >OS_PtrC STA OS_PtrB+1          ; OS_PtrC serves as 3-byte mnemonic input buffer
+                RTS
+  validdata:      LDA OS_Mode                       ; ***** ES LIEGT EIN VALIDES PARSE-DATUM VOR *****
+                  DEC
+                  BCC setmemadr                     ; OS_Mode=0 -> übernimm Daten als einfache neue OS_MemAddr
+                  BEQ mode_deposit                  ; OS_Mode=1 -> übernimm Daten als 'deposit'
+  mode_list:      LDA OS_MemAddr+0 STA OS_PtrA+0    ; OS_Mode=2 -> Daten sind 'list until', print list
+                  LDA OS_MemAddr+1 STA OS_PtrA+1    ; kopiere OS_MemAddr zum Benutzen
+  startlistpage:  LDI 24 STA OS_PtrC                ; reuse as line counter
+  startlistline:  LDI 16 STA OS_Count               ; init: 16 bytes pro Zeile
+                  LDA OS_PtrA+1 PHS JPS OS_PrintHex PLS  ; Drucke aktuelle list-Adresse
+                  LDA OS_PtrA+0 PHS JPS OS_PrintHex PLS
+                  JPS OS_PrintSpace
+                  JPS OS_PrintSpace
+  nextlist:       LDR OS_PtrA PHS JPS OS_PrintHex PLS    ; Speicherinhalt drucken
+                  JPS OS_PrintSpace
+                  LDA OS_PtrA+0
+                  CPA OS_ParseNum+0
+                  BNE listweiter
+                    LDA OS_PtrA+1
+                    CPA OS_ParseNum+1
+                    BNE listweiter
+                      JPS OS_PrintEnter             ; die Liste wurde vollständig gedruckt
+                      JPA clrparsed
+  listweiter:     INW OS_PtrA
+                  DEB OS_Count
+                  CPI 8 BNE notmiddle
+                    JPS OS_PrintSpace               ; print an extra space after 8 bytes
+                    JPA nextlist                    ; bug-fix by paulscottrobson Thank you!
+  notmiddle:      CPI 0 BNE nextlist
+                    JPS OS_PrintEnter
+                    DEB OS_PtrC                     ; reuse as line counter
+                    BNE startlistline
+  listreadchar:       INP BEQ listreadchar
+                      CPI 'q' BNE startlistpage     ; warte auf Tastendruck
+                      JPA clrparsed
+  mode_deposit: LDA OS_ParseNum                     ; validen Daten -> deposit
+                STR OS_MemAddr
+                INW OS_MemAddr
+                JPA clrparsed
+
+; ************************************************************************************************************************
+
+; ******************************
+; Generates a pseudo-random byte
+; push: #
+; pull: value
+; ******************************
+OS_Random:      INB OS_RandomState+0          ; x++
+                LDA OS_RandomState+3 PHS      ; c
+                LDA OS_RandomState+0 PHS
+                JPS OS_XOR PLS
+                LDA OS_RandomState+1 PHS
+                JPS OS_XOR PLS
+                LDS 1 STA OS_RandomState+1    ; a = a^c^x
+                ADB OS_RandomState+2          ; b = b+a
+                LDA OS_RandomState+2 LSR
+                ADA OS_RandomState+3 PHS
+                JPS OS_XOR PLS
+                PLS STA OS_RandomState+3      ; c = (c+(b>>1))^a)
+                STS 3 RTS
+
+; **************************
+; Byte XOR operation
+; push: A, B
+; pull: B, A ^ B
+; **************************
+OS_XOR:         LDI 8 STA OS_PtrC+2      ; init bit counter
+                LDS 4 STA OS_PtrC+0      ; A
+                LDS 3 STA OS_PtrC+1      ; B
+    xorloop:    LDA OS_PtrC+1 LSL STA OS_PtrC+1  ; shift bit 7 of B into carry
+                LDA OS_PtrC+0 BCC b7_is_0        ; load A
+                  CPI 0 BPL rollCin      ; b7 = 1: check bit a, branch if N=1 (C will be 1 after CPI 0)
+                    JPA clearC           ; clear C so it will be shifted back in
+    b7_is_0:      CPI 0 BMI rollCin      ; check bit a, branch if N=1 (C will be 1 after CPI 0)
+    clearC:         CLC
+    rollCin:    ROL STA OS_PtrC+0        ; roll C back in
+                DEB OS_PtrC+2 BNE xorloop
+                  LDA OS_PtrC+0 STS 4
+                  RTS                    ; returns result in rega, changes regb
+
+; *******************
+; Helpful subroutines
+; *******************
+OS_PrintSpace:      LDI ' ' JPA printchar
+  OS_PrintError:    LDI '?' OUT JPS _WaitUART
+  OS_PrintEnter:    LDI 10
+    printchar:      OUT JPS _WaitUART
+                    RTS
+
+  OS_ErrorPrompt:   JPS OS_PrintError                     ; display error '?' and goto WOZMON newline input
+                    JPA OS_Prompt
+
+  OS_DrawLine:      JPS dl_plus                           ; +----------+ line for splash screen
+                    LDI 40 STA OS_Count
+    dl_loop:        LDI '-' OUT JPS _WaitUART
+                    DEB OS_Count BNE dl_loop
+    dl_plus:        LDI '+' OUT JPS _WaitUART
+                    RTS
+
+; **************************
+; Ask user a yes/no question
+; push: #
+; pull: key
+; success: key = 'y'
+; **************************
+  OS_AreYouSure:    LDI <suretext PHS LDI >suretext PHS
+                    JPS OS_Print PLS PLS
+    ays_wait:       INP BEQ ays_wait
+                    STS 3 RTS
+
+; *********************************************************************************
+; Reading in keyboard input into OS_InpBuf until <ENTER> is hit or string is filled
+; *********************************************************************************
+OS_ReadLine:  JPS readexit                            ; resets the LSB of OS_ParsePtr
+  readchar:   INP BEQ readchar                        ; FAST testing (reading/clearing must happen within 16 cycles of receiving)
+                OUT                                   ; 4 output without waiting, since the maximum receive rate is 115.2kHz anyway
+                STR OS_ParsePtr                       ; 10
+                CPI 10 BEQ readexit                   ; 10 teste auf ENTER & BACKSPACE
+                BCS nobackspace                       ; 6(5) ... backspace wäre '8'
+                  DEB OS_ParsePtr                     ; 10 BACKSPACE war's
+                  CPI <OS_InpBuf                      ; 5
+                  BCS readchar                        ; 6(5)
+                    NOP NOP NOP NOP NOP NOP NOP       ; 112
+                    LDI 32 OUT                        ; 8 backspace kompensieren (siehe auch nä. Zeile), JPS _WaitUART ist nicht nötig
+  nobackspace:    INB OS_ParsePtr                     ; 10 kompensiert auch den line pointer
+                  BCC readchar                        ; 6(5) maximale Anzahl von Zeichen wurde eingelesen
+  readexit:         LDI >OS_InpBuf STA OS_ParsePtr+1  ; 12 reset the line pointer
+                    LDI <OS_InpBuf STA OS_ParsePtr+0  ; 12
+                    NOP NOP NOP NOP NOP NOP           ; 96 wait for ENTER to be transmitted
+                    RTS                               ; 14
+
+; **********************************************************
+; OS-specific front-end for HexToWord (skipping over spaces)
+; modifies: OS_ParsePtr, OS_ParseNum
+; **********************************************************
+OS_HexToWord:   LDR OS_ParsePtr CPI 32 BNE htw_nospace
+                  INB OS_ParsePtr JPA OS_HexToWord
+  htw_nospace:  PHS LDA OS_ParsePtr+0 PHS LDA OS_ParsePtr+1 PHS
+                JPS HexToWord PLS PLS PLS
+                RTS
+
+; *********************************************************************************
+; Parses hex number 0x0000 - 0xffff from <addr>, breaks at ANY char != [0..9, a..f]
+; push: #, addr_lsb, addr_msb
+; pull: word_lsb, word_msb, status (OS_ParseNum+2)
+; success: status = 0x00, failure: status = 0xf0
+; modifies: OS_ParsePtr, OS_ParseNum
+; *********************************************************************************
+HexToWord:      LDS 3 STA OS_ParsePtr+1
+                LDS 4 STA OS_ParsePtr+0
+                CLW OS_ParseNum LDI 0xf0 STA OS_ParseNum+2
+  hxgetchar:    LDR OS_ParsePtr                 ; input string lesen
+                CPI 'g' BCS hxreturn            ; above f? -> melde Fehler!
+                CPI 'a' BCS hxletter            ; a...f?
+                CPI ':' BCS hxreturn            ; above 9? -> Separator: Zurück, wenn was da ist, sonst übergehen.
+                CPI '0' BCS hxzahl              ; 0...9?
+                  JPA hxreturn                  ; unter 0? -> Separator: Zurück, wenn was da ist, sonst übergehen.
+  hxletter:     SBI 39
+  hxzahl:       SBI 48
+                PHS
+                LDI 4 STA OS_Count              ; shift existing hex data 4 steps to the left
+  hxshiftloop:  LDA OS_ParseNum+0 LSL STA OS_ParseNum+0
+                LDA OS_ParseNum+1 ROL STA OS_ParseNum+1
+                LDA OS_ParseNum+2 ROL STA OS_ParseNum+2
+                DEB OS_Count BNE hxshiftloop
+                  PLS ADB OS_ParseNum+0         ; add new hex nibble (carry cannot happen)
+                  INW OS_ParsePtr JPA hxgetchar
+  hxreturn:     LDA OS_ParseNum+0 STS 3
+                LDA OS_ParseNum+1 STS 4
+                LDA OS_ParseNum+2 STS 5
+                RTS
+
+; ********************************************************************************************
+; Schreibt einen nullterminierten String at <stradr>
+; push: stradr_lsb, stradr_msb
+; pull: #, #
+; ********************************************************************************************
+OS_Print:       LDS 4 STA printaddr+0           ; get string pointer LSB
+                LDS 3 STA printaddr+1           ; get string pointer MSB
+  printloop:    LDA
+  printaddr:    0xffff                          ; self-modifying code
+                CPI 0 BEQ printend
+                  OUT
+                  LDI 11                        ; waiting loop
+  printwait:      DEC BNE printwait             ; with duration = 3 + n * 11 cycles
+                  INW printaddr
+                   JPA printloop
+  printend:      RTS
+
+; ****************************************************
+; Prints out a byte value <val> in HEX format
+; push: <val>
+; pull: #
+; ****************************************************
+OS_PrintHex:    LDS 3                           ; read value from stack
+                LSR LSR LSR LSR
+                ADI '0'
+                CPI 58 BCC Hex8msn
+                  ADI 39                        ; mache einen Buchstaben draus
+  Hex8msn:      OUT NOP NOP NOP NOP             ; min. 160 cycles bis zum nächsten UART send
+                LDS 3
+                LSL LSL LSL LSL LSR LSR LSR LSR ; no point in optimizing this
+                ADI '0'
+                CPI 58 BCC Hex8lsn
+                  ADI 39
+  Hex8lsn:      OUT
+                LDI 13                          ; waiting loop
+  phex_wait:    DEC BNE phex_wait               ; with duration = 3 + n * 11 cycles
+                RTS
+
+; ***********************************
+; positions the cursor 1..60 or 1..25
+; push: pos
+; pull: #
+; modifies: OS_Count
+; ***********************************
+OS_CursorX:     LDI 27 OUT JPS _WaitUART
+                LDI '[' OUT JPS _WaitUART
+                JPS u6print
+                LDI 'G' OUT JPS _WaitUART     ; set x
+                RTS
+OS_CursorY:     LDI 27 OUT JPS _WaitUART
+                LDI '[' OUT JPS _WaitUART
+                JPS u6print
+                LDI 'd' OUT JPS _WaitUART     ; set y
+                RTS
+  u6print:      CLB OS_Count
+                LDS 5
+    U6_40:      CPI 40 BMI U6_20
+                  SBI 40 PHS LDI 4 ADB OS_Count PLS
+    U6_20:      CPI 20 BMI U6_10
+                  SBI 20 PHS LDI 2 ADB OS_Count PLS
+    U6_10:      CPI 10 BMI U6_00
+                  SBI 10 PHS INB OS_Count PLS
+    U6_00:      PHS LDA OS_Count ADI 48 OUT JPS 0xf00c
+                PLS ADI 48 OUT JPS 0xf00c
+                RTS
+
+; ********************************************************************************************
+; Takes 160 cycles (for UART transmission to complete) when called via API (164 including out)
+; ********************************************************************************************
+OS_WaitUART:    LDI 11                          ; including this statement:
+  wuart_loop:   DEC BNE wuart_loop              ; duration = 3 + n * 11 cycles
+                RTS                             ; JPS: 16, RTS: 14: JPA: 6
+
+; ***************************************************************
+; COMMAND 'Memory filler', copies byte value into block of memory
+; ***************************************************************
+OS_HexFill:   INB OS_ParsePtr
+              JPS OS_HexToWord
+              LDR OS_ParsePtr CPI 10 BEQ OS_ErrorPrompt             ; wurde zu früh ENTER gedrückt?
+              LDA OS_ParseNum+2 CPI 0 BNE OS_ErrorPrompt            ; wurde eine Zahl eingelesen?
+                LDA OS_ParseNum+1 STA OS_PtrA+1 LDA OS_ParseNum+0 STA OS_PtrA+0 ; copy 'from'
+                JPS OS_HexToWord
+                LDR OS_ParsePtr CPI 10 BEQ OS_ErrorPrompt           ; Test wie oben
+                LDA OS_ParseNum+2 CPI 0 BNE OS_ErrorPrompt
+                  LDA OS_ParseNum+1 STA OS_PtrB+1 LDA OS_ParseNum+0 STA OS_PtrB+0    ; copy 'to'
+                  JPS OS_HexToWord
+                  LDA OS_ParseNum+2 CPI 0 BNE OS_ErrorPrompt        ; Test wie oben
+  mfnext:           LDA OS_ParseNum+0 STR OS_PtrA                   ; BESCHREIBE DEN SPEICHER
+                    LDA OS_PtrA+0
+                    CPA OS_PtrB+0
+                    BNE mfweiter
+                      LDA OS_PtrA+1
+                      CPA OS_PtrB+1
+                      BEQ OS_Prompt
+  mfweiter:             INW OS_PtrA
+                        JPA mfnext
+
+; ***************************************
+; COMMAND 'Memory block copy A..B -> C..'
+; ***************************************
+OS_HexCopy:   INB OS_ParsePtr
+              JPS OS_HexToWord
+              LDR OS_ParsePtr CPI 10 BEQ OS_ErrorPrompt             ; wurde zu früh ENTER gedrückt?
+                LDA OS_ParseNum+2 CPI 0 BNE OS_ErrorPrompt          ; wurde eine Zahl eingelesen?
+                  LDA OS_ParseNum+0 STA OS_PtrA+0
+                  LDA OS_ParseNum+1 STA OS_PtrA+1    ; copy source first -> A
+              JPS OS_HexToWord
+              LDR OS_ParsePtr CPI 10 BEQ OS_ErrorPrompt             ; wurde zu früh ENTER gedrückt?
+                LDA OS_ParseNum+2 CPI 0 BNE OS_ErrorPrompt          ; wurde eine Zahl eingelesen?
+                  LDA OS_ParseNum+0 STA OS_PtrB+0
+                  LDA OS_ParseNum+1 STA OS_PtrB+1    ; copy source last -> B
+              JPS OS_HexToWord
+              LDA OS_ParseNum+2 CPI 0 BNE OS_ErrorPrompt            ; wurde eine Zahl eingelesen?
+                LDA OS_ParseNum+0 PHS
+                LDA OS_ParseNum+1 PHS                ; push destination
+              LDA OS_PtrA+0 PHS SBW OS_PtrB          ; push source
+              LDA OS_PtrA+1 PHS SBB OS_PtrB+1 INW OS_PtrB   ; B = B - A + 1
+              LDA OS_PtrB+0 PHS LDA OS_PtrB+1 PHS    ; push number of bytes
+              JPS OS_MemMove LDI 6 ADW 0xffff        ; clean up the stack
+              JPA OS_Prompt
+
+; Moves N bytes from A.. to C.. taking overlap into account.
+; push: C_lsb, C_msb, A_lsb, A_msb, N_lsb, N_msb
+; Pull: #, #, #, #, #, #
+OS_MemMove:   LDS 3 STA OS_PtrB+1 LDS 4 STA OS_PtrB+0   ; number of bytes
+              DEW OS_PtrB BCC mc_done
+              LDS 5 STA OS_PtrA+1 LDS 6 STA OS_PtrA+0   ; source
+              LDS 7 STA OS_PtrC+1 LDS 8 STA OS_PtrC+0   ; destination
+              LDA OS_PtrA+1 CPA OS_PtrC+1 BCC a_less_c BNE c_less_a
+                LDA OS_PtrA+0 CPA OS_PtrC+0 BCC a_less_c BEQ mc_done
+  c_less_a:   LDR OS_PtrA STR OS_PtrC
+              INW OS_PtrA INW OS_PtrC
+              DEW OS_PtrB BCS c_less_a
+                RTS
+  a_less_c:   LDA OS_PtrB+1 ADB OS_PtrA+1 LDA OS_PtrB+1 ADB OS_PtrC+1
+              LDA OS_PtrB+0 ADW OS_PtrA LDA OS_PtrB+0 ADW OS_PtrC
+    alc_loop: LDR OS_PtrA STR OS_PtrC
+              DEW OS_PtrA DEW OS_PtrC
+              DEW OS_PtrB BCS alc_loop
+  mc_done:      RTS
+
+; **********************
+; COMMAND 'Disassembler'
+; **********************
+OS_Disasm:    INB OS_ParsePtr
+              JPS OS_HexToWord
+              LDA OS_ParseNum+2 CPI 0 BNE OS_ErrorPrompt            ; wurde eine Zahl eingelesen?
+                LDA OS_ParseNum+1 STA OS_PtrA+1 LDA OS_ParseNum+0 STA OS_PtrA+0 ; copy 'start'
+  disstartpage: LDI 24 STA OS_Count
+  disnextline:  LDA OS_PtrA+1 PHS JPS OS_PrintHex PLS               ; Drucke aktuelle list-Adresse
+                LDA OS_PtrA+0 PHS JPS OS_PrintHex PLS
+                JPS OS_PrintSpace
+                LDI <mnemonics STA OS_PtrB+0 LDI >mnemonics STA OS_PtrB+1   ; point OS_PtrB to lookup
+                LDR OS_PtrA CPI 0x40 BCC disinstruct
+                  LDI '?' OUT JPS _WaitUART                         ; not a valid mnemonic
+                  JPA finishline
+  disinstruct:  LSL ADR OS_PtrA ADW OS_PtrB                         ; PRINT MNEMONIC
+                LDR OS_PtrB OUT JPS _WaitUART INW OS_PtrB           ; output the XXX mnemonic
+                LDR OS_PtrB OUT JPS _WaitUART INW OS_PtrB
+                LDR OS_PtrB OUT JPS _WaitUART
+                JPS OS_PrintSpace
+                LDR OS_PtrA                                         ; retrieve length of operand -> A
+                CPI 14 BCC finishline CPI 54 BEQ finishline
+                CPI 55 BEQ finishline CPI 57 BEQ finishline
+                CPI 20 BCC disone CPI 52 BEQ disone CPI 53 BEQ disone
+  distwo:         LDI 2 ADW OS_PtrA                                 ; 2 forward
+                  LDR OS_PtrA PHS JPS OS_PrintHex PLS               ; print MSB
+                  DEW OS_PtrA                                       ; 1 back
+                  LDR OS_PtrA PHS JPS OS_PrintHex PLS               ; print LSB
+                  INW OS_PtrA
+                  JPA finishline
+    disone:     INW OS_PtrA
+                LDR OS_PtrA PHS JPS OS_PrintHex PLS
+  finishline:   INW OS_PtrA                                         ; proceed to next instruction
+                JPS OS_PrintEnter
+                DEB OS_Count                                        ; count lines
+                BNE disnextline
+  disreadchar:    INP BEQ disreadchar
+                  CPI 'q' BNE disstartpage                          ; warte auf Tastendruck
+                  JPA OS_Prompt
+
+; ***********************************************
+; COMMAND 'Format' (or SSD Format 4KB Block only)
+; ***********************************************
+OS_Bank:      INB OS_ParsePtr
+              JPS OS_HexToWord ; parse the input line
+              LDA OS_ParseNum+2 CPI 0xf0 BEQ OS_ErrorPrompt         ; wurde eine Zahl eingelesen (0x00) oder nicht (0xf0)
+                LDA OS_ParseNum+0 CPI 0x10 BCS OS_ErrorPrompt
+                BNK
+                JPA OS_Prompt
+
+; ***************************************
+; COMMAND 'Format' (SSD format 32KB bank)
+; ***************************************
+OS_WipeSSD:   PHS JPS OS_AreYouSure PLS
+              CPI 'y' BNE OS_Prompt
+  format_all:     CLW OS_PtrA                                   ; start of SSD = 0x0000
+  format_loop:    JPS FLASH_Erase                               ; block address is in OS_PtrA
+                  LDI 0x10 ADB OS_PtrA+1 BPL format_loop        ; gehe bis 0x70, bei 0x80 ist Schluss
+                    JPA OS_Prompt
+
+; ****************************************************************************************************
+; COMMAND 'Save data to SSD file system', usage: s <first hex addr> <last hex addr> <filename> <ENTER>
+; ****************************************************************************************************
+OS_SaveFile:      INB OS_ParsePtr
+                  JPS OS_HexToWord ; parse first address
+                  LDR OS_ParsePtr CPI 10 BEQ OS_ErrorPrompt           ; wurde zu früh ENTER gedrückt?
+                    LDA OS_ParseNum+2 CPI 0 BNE OS_ErrorPrompt        ; wurde eine Zahl eingelesen?
+                      LDA OS_ParseNum+1 STA OS_PtrA+1
+                      LDA OS_ParseNum+0 STA OS_PtrA+0                 ; first -> PtrA
+                  JPS OS_HexToWord ; parse last address
+                  LDR OS_ParsePtr CPI 10 BEQ OS_ErrorPrompt
+                    LDA OS_ParseNum+2 CPI 0 BNE OS_ErrorPrompt
+                      LDA OS_ParseNum+1 STA OS_PtrB+1
+                      LDA OS_ParseNum+0 STA OS_PtrB+0                 ; last -> PtrB
+  sf_searchname:  LDR OS_ParsePtr                                     ; parse for anything but RETURN for valid filename
+                  CPI 10 BEQ OS_ErrorPrompt
+                  CPI 32 BNE sf_validname                             ; skip leading spaces...
+                    INW OS_ParsePtr
+                    JPA sf_searchname
+  sf_validname:   LDA OS_ParsePtr+0 PHS LDA OS_ParsePtr+1 PHS         ; push parameters on stack
+                  LDA OS_PtrA+0 PHS LDA OS_PtrA+1 PHS
+                  LDA OS_PtrB+0 PHS LDA OS_PtrB+1 PHS
+                  JPS SSD_SaveFile
+                  LDI 5 ADB 0xffff PLS                                ; clean up stack and pull result
+                  CPI 0 BEQ OS_ErrorPrompt                            ; check for error
+                    JPA OS_Prompt
+
+; *************************************************************
+; COMMAND 'Load file from SSD', usage: ... l <filename> <ENTER>
+; *************************************************************
+OS_LoadFile:        INB OS_ParsePtr
+                    CLW OS_ParseNum                                   ; don't use a custom start address here
+  lf_searchname:    LDR OS_ParsePtr                                   ; parse for anything but RETURN for valid filename
+                    CPI 10 BEQ OS_ErrorPrompt
+                    CPI 0 BEQ OS_ErrorPrompt
+                    CPI 32 BNE lf_validname                           ; skip leading spaces...
+                      INW OS_ParsePtr JPA lf_searchname
+  lf_validname:     LDA OS_ParsePtr+0 PHS LDA OS_ParsePtr+1 PHS
+                    JPS SSD_LoadFile
+                      PLS STA OS_MemAddr+0 PLS STA OS_MemAddr+1 CPI 0x80 BCC OS_ErrorPrompt    ; check if successful
+                      JPA OS_Prompt
+
+; **********************************************
+; COMMAND 'Show SSD directory', usage: t <ENTER>
+; **********************************************
+OS_DirTable:      INB OS_ParsePtr
+                  LDI <dirtext PHS LDI >dirtext PHS JPS OS_Print PLS PLS          ; print the directory headline
+                  CLW OS_PtrC                                                     ; look at beginning of SSD area
+  dir_file:         LDA OS_PtrC+1 CPI 0x80 BCS dir_showfree                       ; pointer inside FLASH?
+                    LDR OS_PtrC CPI 0xff BEQ dir_showfree                         ; end of dir reached
+                    LDA OS_PtrC+0 PHS LDA OS_PtrC+1 PHS JPS OS_Print PLS PLS      ; print filename
+                    LDI 21 PHS JPS OS_CursorX                                     ; move cursor to absolute column
+                    LDI 21 ADW OS_PtrC                                            ; advance over header to start addr MSB!!!
+                    LDR OS_PtrC PHS JPS OS_PrintHex PLS
+                    DEW OS_PtrC LDR OS_PtrC PHS JPS OS_PrintHex PLS               ; print start addr
+                    JPS OS_PrintSpace
+                    LDI 3 ADW OS_PtrC                                             ; advance to bysize MSB!!!
+                    LDR OS_PtrC STA OS_PtrB+1 PHS JPS OS_PrintHex PLS
+                    DEW OS_PtrC LDR OS_PtrC STA OS_PtrB+0 PHS JPS OS_PrintHex PLS
+                    JPS OS_PrintEnter
+                    LDI 2 ADW OS_PtrC                                             ; advance to start of data block
+                    LDA OS_PtrB+1 ADB OS_PtrC+1 LDA OS_PtrB+0 ADW OS_PtrC         ; jump forward to next file
+                    JPA dir_file
+  dir_showfree:       LDI 0x00 STA OS_PtrB+0 LDI 0x80 STA OS_PtrB+1
+                      LDA OS_PtrC+1 SBB OS_PtrB+1 LDA OS_PtrC+0 SBW OS_PtrB
+                      LDI <freetext PHS LDI >freetext PHS JPS OS_Print PLS PLS
+                      LDA OS_PtrB+1 PHS JPS OS_PrintHex PLS
+                      LDA OS_PtrB+0 PHS JPS OS_PrintHex PLS
+                      JPS OS_PrintEnter
+                      JPA OS_Prompt
+
+; **********************************************************************
+; COMMAND 'Erase file from SSD', migrates the stuff above
+; uses: OS_InpBuf+20/21: pointer to potential data to keep
+;       OS_InpBuf+23:    SSD sector start addr MSB backup
+;       OS_InpBuf+24/25: pointer to first free SSD byte PRIOR to erasing
+; **********************************************************************
+OS_ZapFile:         INB OS_ParsePtr                                               ; move to potential filename start
+  zf_searchname:    LDR OS_ParsePtr
+                    CPI 0 BEQ OS_ErrorPrompt                                      ; parse for beginning of valid filename
+                    CPI 10 BEQ OS_ErrorPrompt
+                    CPI 32 BNE zf_validname                                       ; skip over leading spaces
+                      INW OS_ParsePtr JPA zf_searchname
+
+  zf_validname:     LDA OS_ParsePtr+0 PHS LDA OS_ParsePtr+1 PHS                   ; push <nameptr>
+                    JPS SSD_FindFile                                              ; SUCCESS => PtrA = file pointer
+                    PLS STA OS_PtrA+1 PLS STA OS_PtrA+0                           ; pull <fileptr>
+                    LDA OS_PtrA+1 CPI 0x80 BCS OS_ErrorPrompt                     ; FAILURE => can't find that file!
+                      PHS JPS OS_AreYouSure PLS                                   ; FILE FOUND! Now ask for permission.
+                      CPI 'y' BNE OS_Prompt
+                      PHS PHS JPS SSD_FindFree                                    ; find first free byte
+                      PLS STA OS_InpBuf+25 PLS STA OS_InpBuf+24                   ; copy current sector's 'data to keep' from start of sector to OS_PtrA-1 to SSD buffer
+                      CLB OS_PtrB+0 LDA OS_PtrA+1                                 ; calculate sector start address in OS_PtrB
+                      LSR LSR LSR LSR LSL LSL LSL LSL                             ; clear lower nibble of MSB
+                      STA OS_PtrB+1 STA OS_InpBuf+23                              ; store sector start addr in OS_InpBuf+23 too
+                      LDI <OS_SSDRAMBuf STA OS_PtrC+0                             ; destination = SSD buffer in RAM
+                      LDI >OS_SSDRAMBuf STA OS_PtrC+1                             ; to PtrC
+
+                      ; PtrA: pointer to file to be erased, PtrB: sector start address, PtrC: start of RAM buffer
+  e_copyloop1:        LDA OS_PtrB+1 CPA OS_PtrA+1 BCC e_copynext                  ; keep potential rest data below the file to be erased
+                        LDA OS_PtrB+0 CPA OS_PtrA+0 BCC e_copynext
+                          JPA e_gotokeep                                          ; everything until start of erase data has been copied
+  e_copynext:         LDR OS_PtrB STR OS_PtrC                                     ; copy data below file into SSD buffer
+                      INW OS_PtrB INW OS_PtrC
+                      JPA e_copyloop1
+
+  e_gotokeep:         ; PtrA: Start of file to be erased
+                      LDI 22 ADW OS_PtrA                                          ; advance over header to bytesize LSB
+                      LDR OS_PtrA STA OS_PtrB+0 INW OS_PtrA                       ; extract bytesize -> PtrB
+                      LDR OS_PtrA STA OS_PtrB+1 INW OS_PtrA                       ; PtrA after header
+                      LDA OS_PtrB+1 ADB OS_PtrA+1 LDA OS_PtrB+0 ADW OS_PtrA       ; add size => PtrA now points beyond file to be erased
+
+                      ; fill up SSD buffer with more data to keep up to existing data, fill rest with 0xff
+                      ; PtrA: Start of potential data to keep, PtrC: next free pos in OS_SSDRAMBuf
+  e_copyloop2:        LDA OS_PtrC+1 CPI 0xf0 BCS e_blockready                     ; check, if buffer block is ready/full
+                        LDA OS_PtrA+1 CPA OS_InpBuf+25 BCC e_copynext2            ; check against existing data
+                          LDA OS_PtrA+0 CPA OS_InpBuf+24 BCC e_copynext2
+                            LDI 0xff STR OS_PtrC INW OS_PtrC                      ; fill with 0xff
+                            JPA e_copyloop2
+  e_copynext2:        LDR OS_PtrA STR OS_PtrC                                     ; write data into SSD buffer RAM
+                      INW OS_PtrA INW OS_PtrC
+                      JPA e_copyloop2
+
+  e_blockready:       ; save PtrA (start of next potential data to keep) in OS_InpBuf+20/21 for later use
+                      LDA OS_PtrA+0 STA OS_InpBuf+20
+                      LDA OS_PtrA+1 STA OS_InpBuf+21
+
+                      ; erase FLASH block
+                      CLB OS_PtrA+0 LDA OS_InpBuf+23 STA OS_PtrA+1                ; PtrA = sector start address to be erased
+                      JPS FLASH_Erase
+
+                      ; write data in RAM buffer back to FLASH block
+                      LDI <OS_SSDRAMBuf STA OS_PtrA+0                             ; set source
+                      LDI >OS_SSDRAMBuf STA OS_PtrA+1
+                      LDI 0x00 STA OS_PtrB+0                                      ; set bytesize
+                      LDI 0x10 STA OS_PtrB+1
+                      CLB OS_PtrC+0 LDA OS_InpBuf+23 STA OS_PtrC+1                ; set destination
+                        LDI '.' OUT JPS _WaitUART                                 ; indicate block erase & write progress
+                      JPS FLASH_Write
+                      LDA OS_PtrB+1 CPI 0xff BNE OS_ErrorPrompt                   ; check error state
+
+                      ; PtrC: points beyond last byte written to SSD
+                      LDA OS_PtrC+1 CPA OS_InpBuf+25 BCC e_goon BNE e_alldone     ; wurde bereits über existing data hinaus geschrieben?
+                        LDA OS_PtrC+0 CPA OS_InpBuf+24 BCS e_alldone
+  e_goon:                 ; restore the pointers A and C properly
+                          LDI 0x10 ADB OS_InpBuf+23                               ; increment the sector address to write to
+                          LDI <OS_SSDRAMBuf STA OS_PtrC+0                         ; PtrC: SSD buffer start in RAM
+                          LDI >OS_SSDRAMBuf STA OS_PtrC+1
+                          LDA OS_InpBuf+20 STA OS_PtrA+0                          ; PtrA: restore pointer to next data to keep
+                          LDA OS_InpBuf+21 STA OS_PtrA+1
+                          JPA e_copyloop2                                         ; process next whole block
+  e_alldone:          LDI 10 OUT JPS _WaitUART                                    ; ALLES FERTIG!
+                      JPA OS_Prompt
+
+; ************************************************************************
+; Eraseses a 4KB FLASH memory block without ANY protection (use with care)
+; PtrA: address of FLASH block to be erased to 0xff, PtrA remains unchanged
+; only the upper nibble of the MSB is relevant here
+; ************************************************************************
+FLASH_Erase:      LDI 0xaa STA 0x5555                          ; issue FLASH ERASE COMMAND
+                  LDI 0x55 STA 0x2aaa
+                  LDI 0x80 STA 0x5555
+                  LDI 0xaa STA 0x5555
+                  LDI 0x55 STA 0x2aaa
+                  LDI 0x30 STR OS_PtrA                         ; initiate the BLOCK ERASE command
+  fe_wait:        LDR OS_PtrA LSL BCC fe_wait                  ; wait for 8th bit go HIGH, this code HAS to run in RAM!
+                    RTS
+
+; ********************************************************
+; Loads file <name> from SSD, <name> must be terminated by 0 or ENTER
+; push: nameptr_lsb, nameptr_msb
+; pull: target_lsb, target_msb
+; success: target_msb >= 0x80
+; modifies: ParsePtr, PtrA, PtrB, PtrC
+; ***********************************************************
+SSD_LoadFile:       LDS 4 PHS LDS 4 PHS                                           ; re-push nameptr_lsb/msb
+                    JPS SSD_FindFile                                              ; SUCCESS => PtrA = file pointer
+                    PLS STA OS_PtrA+1 PLS STA OS_PtrA+0                           ; pull <fileptr>
+                    LDA OS_PtrA+1 CPI 0x80 BCS lf_returnfalse                     ; FAILURE => can't find that file!
+                      LDI 20 ADW OS_PtrA                                          ; advance over header to start addr LSB
+                      LDR OS_PtrA STA OS_PtrC+0 STS 3 INW OS_PtrA                 ; extract destination -> PtrC and stack
+                      LDR OS_PtrA STA OS_PtrC+1 STS 4 INW OS_PtrA
+  lf_extractsize:     LDR OS_PtrA STA OS_PtrB+0 INW OS_PtrA                       ; extract bytesize -> PtrB
+                      LDR OS_PtrA STA OS_PtrB+1 INW OS_PtrA                       ; PtrA now holds source address
+  lf_loadloop:          DEW OS_PtrB BCC lf_returntrue                              ; alles kopiert?
+                        LDR OS_PtrA STR OS_PtrC                                    ; copy block from A -> to C
+                        INW OS_PtrA INW OS_PtrC
+                        JPA lf_loadloop
+  lf_returnfalse:   LDI 0 STS 4                                                   ; invalidate target_msb
+  lf_returntrue:    RTS
+
+; ***************************************************************************************
+; Saves memory area as file <name> to SSD drive, checks if there is enough space
+; push: nameptr_lsb, nameptr_msb, first_lsb, first_msb, last_lsb, last_msb
+; pull: #, #, #, #, #, ret
+; success: ret = 1, failure: ret = 0
+; modifies: OS_Count, PtrA, PtrB, PtrC, PtrD, OS_InpBuf
+; ***************************************************************************************
+                  ; assemble a zero-filled 20-byte filename starting at OS_InBuf for the header
+SSD_SaveFile:     LDI 19 STA OS_Count                                   ; copy up to 19 chars of filename
+                  LDS 8 STA OS_PtrA+0 LDS 7 STA OS_PtrA+1               ; nameptr -> PtrA
+                  LDI <OS_InpBuf STA OS_PtrB+0 LDI >OS_InpBuf STA OS_PtrB+1   ; OS_InpBuf -> PtrB
+  sf_namecopy:      LDR OS_PtrA                                         ; read a name char
+                    CPI 11 BCC sf_nameend                               ; anything <= LF ends name
+                    STR OS_PtrB                                         ; copy name char
+                    INW OS_PtrA INW OS_PtrB
+                    DEB OS_Count BNE sf_namecopy
+  sf_nameend:     LDI 0 STR OS_PtrB                                     ; overwrite rest including 20th byte with zero
+                  INW OS_PtrB DEB OS_Count BCS sf_nameend
+
+                  ; look for enough free space on the SSD partition
+                  PHS PHS JPS SSD_FindFree
+                  PLS STA OS_PtrC+1 STA OS_PtrD+1                       ; free -> PtrC, PtrD
+                  PLS STA OS_PtrC+0 STA OS_PtrD+0
+                  LDS 6 SBW OS_PtrD LDS 5 SBB OS_PtrD+1                 ; free - start -> PtrD
+                  LDS 4 STA OS_PtrB+0 ADW OS_PtrD                       ; last -> PtrB
+                  LDS 3 STA OS_PtrB+1 ADB OS_PtrD+1                     ; free - start + last -> PtrD
+                  LDI 24 ADW OS_PtrD                                    ; free - start + last + 24 -> PtrD
+                  LDA OS_PtrD+1 CPI 0x80 BCS sf_returnfalse             ; wurde kein freier Platz gefunden?
+
+                  ; calculate data bytesize
+                  LDS 5 SBB OS_PtrB+1 BCC sf_returnfalse                ; last - first -> PtrB
+                  LDS 6 SBW OS_PtrB BCC sf_returnfalse
+                    INW OS_PtrB                                         ; last - first + 1 -> PtrB
+
+                  ; write header start address and bytesize
+                  LDS 6 STA OS_InpBuf+20 LDS 5 STA OS_InpBuf+21         ; write start addr to header
+                  LDA OS_PtrB+0 STA OS_InpBuf+22                        ; write bytesize to header
+                  LDA OS_PtrB+1 STA OS_InpBuf+23
+
+                  ; write header to FLASH memory
+                  LDI <OS_InpBuf STA OS_PtrA+0                        ; start addr of header -> PtrA
+                  LDI >OS_InpBuf STA OS_PtrA+1                        ; free addr is already in PtrC
+                  CLB OS_PtrB+1 LDI 24 STA OS_PtrB+0                  ; bytesize of header -> PtrB
+                  JPS FLASH_Write                                     ; write the header (incrementing OS_PtrC)
+                  LDA OS_PtrB+1 CPI 0xff BNE sf_returnfalse           ; check if all bytes have been written successfully
+
+                  ; write body to FLASH memory
+                  LDS 6 STA OS_PtrA+0 LDS 5 STA OS_PtrA+1             ; start -> PtrA
+                  LDA OS_InpBuf+22 STA OS_PtrB+0                      ; bytesize -> PtrB
+                  LDA OS_InpBuf+23 STA OS_PtrB+1                      ; PtrC already positioned behind header
+                  JPS FLASH_Write                                     ; write the data body
+                  LDA OS_PtrB+1 CPI 0xff BNE sf_returnfalse           ; check if all bytes have been written successfully
+                    LDI 1 STS 8 RTS                                   ; return success
+
+  sf_returnfalse: LDI 0 STS 8 RTS                                     ; return failure
+
+; *********************************************************************************
+; Writes data to FLASH (but protects RAM), PtrA: source, PtrB: bytesize, PtrC: dest
+; push: dest_lsb, dest_msb, bytesize_lsb, bytesize_msb, source_lsb, source_msb
+; pull: -, -, -, result, nextdest_msb, nextdest_lsb
+; modifies: OS_PtrB (0xffff: success, else failure)
+;           OS_PtrA (points to byte after source data if successful)
+;           OS_PtrC (points to byte after target data if successful)
+; *********************************************************************************
+FLASH_Write:      DEW OS_PtrB BCC fw_return                     ; Anzahl runterzählen (success rückmelden)
+                    LDA OS_PtrC+1 CPI 0x80 BCS fw_return        ; teste, ob dest addr < 0x8000 ist (FLASH)
+                      LDR OS_PtrC CPI 0xff BNE fw_return        ; teste, ob dest byte == 0xff ist
+                        LDI 10 STA OS_Count                     ; re-read a maximum times
+                        LDI 0xaa STA 0x5555                     ; INIT FLASH WRITE PROGRAM
+                        LDI 0x55 STA 0x2aaa
+                        LDI 0xa0 STA 0x5555
+                        LDR OS_PtrA STR OS_PtrC                 ; START WRITE PROCESS
+  fw_writecheck:          DEB OS_Count BCC fw_return            ; write took too long => ERROR!
+                          LDR OS_PtrA CPR OS_PtrC               ; re-read FLASH location
+                          BNE fw_writecheck                     ; data okay?
+                        INW OS_PtrA INW OS_PtrC                 ; increase both pointers to next location
+                        JPA FLASH_Write
+  fw_return:      RTS
+
+; ***********************************************************
+; Returns the address <free> of the first free byte in SSD
+; push: #, #
+; pull: free_msb, free_lsb
+; success: free_msb < 0x80
+; modifies: PtrC, PtrD
+; ***********************************************************
+SSD_FindFree:     CLW OS_PtrC                                         ; look at beginning of SSD area
+  ffree_loop:     LDA OS_PtrC+1 CPI 0x80 BCS ffree_return             ; return >=0x8000
+                  LDR OS_PtrC CPI 0xff BEQ ffree_return               ; return with free diskspace
+                    LDI 22 ADW OS_PtrC                                ; advance over header to bytesize info
+                    LDR OS_PtrC STA OS_PtrD+0 INW OS_PtrC             ; read out the bytesize of this file
+                    LDR OS_PtrC STA OS_PtrD+1 INW OS_PtrC             ; PtrC now points right after header
+                    LDA OS_PtrD+1 ADB OS_PtrC+1                       ; add the bytesize to OS_PtrC
+                    LDA OS_PtrD+0 ADW OS_PtrC+0
+                    JPA ffree_loop
+  ffree_return:   LDA OS_PtrC+0 STS 4 LDA OS_PtrC+1 STS 3             ; put file pointer on stack
+                  RTS
+
+; *************************************************
+; Searches for <filename> stored at <nameptr>
+; <filename> must be terminated with either 0 or LF
+; push: nameptr_lsb, nameptr_msb
+; pull: fileptr_msb, fileptr_lsb
+; success: fileptr_msb < 0x80
+; modifies: OS_PtrA, OS_PtrB, OS_PtrC
+; *************************************************
+SSD_FindFile:     ; browse through all stored files and see if <filename> matches name, any zero stops
+                  CLW OS_PtrA                                                     ; PtrA -> start of SSD area
+  ff_search:      LDA OS_PtrA+1 CPI 0x80 BCS ff_returnfalse                       ; end of SSD reached -> no match!
+                  LDR OS_PtrA CPI 0xff BEQ ff_returnfalse                         ; end of data reached -> no match!
+                    ; check if name matches
+                    LDA OS_PtrA+0 STA OS_PtrC+0 LDA OS_PtrA+1 STA OS_PtrC+1       ; copy address of file A -> C
+                    LDS 4 STA OS_PtrB+0 LDS 3 STA OS_PtrB+1                       ; copy address of name -> B
+  match_loop:       LDR OS_PtrB CPI 10 BNE trymatch                               ; tausche ENTER gegen 0 aus
+                      LDI 0
+  trymatch:         CPR OS_PtrC BNE files_dontmatch                               ; stimmen Buchstaben überein?
+                      CPI 0 BEQ ff_returntrue                                     ; wurde gemeinsame 0 erreicht => match!
+                        INW OS_PtrB INW OS_PtrC                                   ; sonst gehe zum nächsten
+                        JPA match_loop
+                    ; ***** these filenames don't match *****
+  files_dontmatch:  LDI 22 ADW OS_PtrA                                            ; advance over header to bytesize LSB
+                    LDR OS_PtrA STA OS_PtrB+0 INW OS_PtrA                         ; extract bytesize -> PtrB
+                    LDR OS_PtrA STA OS_PtrB+1 INW OS_PtrA
+                    LDA OS_PtrB+1 ADB OS_PtrA+1 LDA OS_PtrB+0 ADW OS_PtrA         ; PtrA points beyond file
+                    JPA ff_search
+  ff_returnfalse:     LDI 0x00 STS 4 LDI 0x80 STS 3 RTS                           ; return false file pointer
+  ff_returntrue:      LDA OS_PtrA+0 STS 4 LDA OS_PtrA+1 STS 3 RTS                 ; return true file pointer
+
+; *********************************************
+; This section contains all text and other data
+; *********************************************
+  mnemonics:    'NOP', 'BNK', 'OUT', 'CLC', 'SEC', 'LSL', 'ROL', 'LSR'
+                'ROR', 'ASR', 'INP', 'NEG', 'INC', 'DEC', 'LDI', 'ADI'
+                'SBI', 'CPI', 'ACI', 'SCI', 'JPA', 'LDA', 'STA', 'ADA'
+                'SBA', 'CPA', 'ACA', 'SCA', 'JPR', 'LDR', 'STR', 'ADR'
+                'SBR', 'CPR', 'ACR', 'SCR', 'CLB', 'NEB', 'INB', 'DEB'
+                'ADB', 'SBB', 'ACB', 'SCB', 'CLW', 'NEW', 'INW', 'DEW'
+                'ADW', 'SBW', 'ACW', 'SCW', 'LDS', 'STS', 'PHS', 'PLS'
+                'JPS', 'RTS', 'BNE', 'BEQ', 'BCC', 'BCS', 'BPL', 'BMI'
+
+  hometxt:       27, '[H', 27, '[H', 27, '[J', 0
+  starttxt:     '| MINIMAL CPU SYSTEM 1.5.3 by C. Herting |', 10
+                '| 512KB SSD - 32KB RAM - Type m for menu |', 10, 0
+
+  menutxt:      10
+                'HEX [r] Set A [run]', 10
+                '[A].B   Show [A]..B [q]', 10
+                ':C[ D]  Store C [D] at A..', 10
+                'v A B C Fill A..B with C', 10
+                'k A B C Copy A..B to C..', 10
+                'i A     Disasm A.. [q]', 10
+                's A B F Save A..B as file F', 10
+                'l file  Load file', 10
+                'z file  Zap file', 10
+                'n 0..f  Set SSD bank', 10
+                't       Show SSD content', 10
+                'w       Wipe SSD bank', 10
+                10, 0
+
+  dirtext:      10, 'FILE', 27, '[21G', 'DEST SIZE', 10, 0
+  freetext:     27, '[21GFREE ', 0
+  suretext:     'y/n?', 10, 0
+
+OS_Copy_End:                                    ; address of first byte beyond OS code
+
+                #end                            ; VARIABLES USED BY THE OS
+
+#org 0xe000     OS_SSDRAMBuf:                   ; 4KB buffer for 'data to keep' when moving files and erasing SSD blocks
+#org 0xfeb0     OS_MemAddr:                     ; current memory address (16 bytes von MINOS am unteren Ende des Stack)
+#org 0xfeb2     OS_ParsePtr:                    ; Zeiger auf das letzte eingelesene Zeichen (to be reset at startup)
+#org 0xfeb4     OS_ParseNum:                    ; 3-byte storage for a parsed 16-bit number, MSB: f0=invalid, 0=valid
+#org 0xfeb7     OS_Mode:                        ; byte 0: normal, 1: deposit, 2: list
+#org 0xfeb8     OS_Count:                       ; lokaler byte counter
+#org 0xfeb9     OS_PtrA:                        ; lokaler pointer
+#org 0xfebb     OS_PtrB:                        ; lokaler pointer, Zeiger auf mnemonic input position
+#org 0xfebd     OS_PtrC:                        ; lokaler pointer, reuse as byte line counter & 3-byte-Speicher für mnemonic
+#org 0xfec0     OS_PtrD:                        ; lokaler pointer
+#org 0xfec2     OS_RandomState:                 ; 4 bytes (x, a, b, c) state of the pseudo-random generator
+#org 0xfec6     OS_unused:                      ; 3 unused bytes for more variables
+#org 0xfec9     OS_InpBuf:                      ; 55 bytes line input string (also used by FLASH erase monitor)
+
+; *******************************************************************************
+; Copyright (c) 2022 Carsten Herting (slu4)
+; *******************************************************************************
+; MIT LICENSE
+; Permission is hereby granted, free of charge, to any person obtaining a copy of
+; this software and associated  documentation files  (the "Software"), to deal in
+; the Software without  restriction, including  without  limitation the rights to
+; use, copy,  modify, merge, publish, distribute, sublicense,  and/or sell copies
+; of the Software, and  to permit persons to whom the Software is furnished to do
+; so, subject to the following conditions:
+; The above copyright notice and  this permission notice shall be included in all
+; copies or substantial portions of the Software.
+; THE  SOFTWARE  IS PROVIDED "AS IS",  WITHOUT  WARRANTY OF  ANY KIND, EXPRESS OR
+; IMPLIED,  INCLUDING  BUT  NOT  LIMITED  TO  THE  WARRANTIES OF MERCHANTABILITY,
+; FITNESS FOR  A PARTICULAR  PURPOSE AND  NONINFRINGEMENT. IN NO  EVENT SHALL THE
+; AUTHORS  OR  COPYRIGHT  HOLDERS  BE  LIABLE FOR  ANY  CLAIM, DAMAGES  OR  OTHER
+; LIABILITY,  WHETHER IN AN ACTION  OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+; OUT OF OR IN  CONNECTION WITH  THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+; SOFTWARE.
+; *******************************************************************************
+

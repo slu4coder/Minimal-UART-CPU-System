@@ -1,0 +1,4 @@
+def test()
+  return "b" + "c"
+
+print "a" + test()

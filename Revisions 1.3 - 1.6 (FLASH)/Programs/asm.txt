@@ -1,0 +1,696 @@
+; Minimal Assembler for the 'Minimal CPU System'
+; written by Carsten Herting 22.5.2021 - 29.5.2021
+
+#org 0xd000   ; build address of the assember
+
+; To let this assembler assemble itself natively on the Minimal, do the following: Read through this and the
+; next text block completely. Uncomment the next block. Change the above build address from 0xd000 t0 0xc000.
+; Remove all comments of this source by searching for the REGEX ;([\s\S]*). Remove all trailing SPACES as well.
+
+; #end        ; and transfer the source file over to the Minimal (see 'Native Tool Chain / Text File Transfer'
+; #org 0xd000 ; of the reference manual for more information. Load the assembler and build with
+; #begin      ; 'd000 r <source> ENTER'. Copy the output to it's target address with 'k c000 cfff d000 ENTER'.
+
+Init:         LDI 0xfe STA 0xffff                           ; init stack
+              LDI <IntroText PHS LDI >IntroText PHS
+              JPS _Print PLS PLS                            ; print the intro message
+  useloop:    LDR _ParsePtr
+              CPI 10 BEQ useeditor
+                CPI ' ' BNE useread
+                  INW _ParsePtr JPA useloop
+  useread:      LDA _ParsePtr+0 PHS LDA _ParsePtr+1 PHS
+                JPS _FindFile PLS
+                CPI 0x80 BCS FileError STA srcptr+1
+                  PLS STA srcptr+0
+                  LDI 24 ADW srcptr                         ; hop to start of text data
+                  LDI 0x00 STA asmptr+0                     ; use all the RAM for asm code
+                  LDI 0x80 STA asmptr+1
+                  JPA PassOne
+  useeditor:  LDI 0 PHS                                     ; find end of editor's source file
+              LDI <EditorSrc STA srcptr+0 STA asmptr+0 PHS  ; init source line pointer to editor default
+              LDI >EditorSrc STA srcptr+1 STA asmptr+1 PHS
+              JPS length PLS                                ; find length of editor's text file
+              PLS ADB asmptr+1
+              PLS ADW asmptr INW asmptr                     ; get start of assembler destination (step over zero)
+
+PassOne:      LDI '1' OUT JPS _WaitUART
+              LDI <labels STA labelend+0                    ; init pointer to label table
+              LDI >labels STA labelend+1
+              LDA srcptr+0 STA src_lptr+0                   ; init source line pointer
+              LDA srcptr+1 STA src_lptr+1
+              LDA asmptr+0 STA asm_lptr+0                   ; init destination line pointer
+              LDA asmptr+1 STA asm_lptr+1
+              CLW Line INW Line                             ; start with line number zero
+  p1loop:     LDA asm_lptr+0 STA ptr+0                      ; ptr = asm_lptr
+              LDA asm_lptr+1 STA ptr+1
+              CLB num                                       ; count valid line bytes
+  p1copyloop: LDR src_lptr PHS INW src_lptr PLS             ; consume src byte
+                STR ptr CPI 11 BCC lineend                  ; <= LF?
+                  INB num INW ptr JPA p1copyloop            ; count the valid bytes
+  lineend:    CPI 10 BEQ ProcLine                           ; was the line end an LF?
+                LDA num CPI 0 BEQ PassTwo                   ; end = 0: Was line empty? -> done
+                  LDI 10 STR ptr                            ; last line wasn't empty -> change end from 0 to LF
+                  DEW src_lptr                              ; unconsume 'src zero'
+  ProcLine:   JPS DelComments
+              JPS TrimBack
+              JPS TrimFront
+              JPS HexToDollar
+              JPS ExplStrings     ; must be followed by a SingleSpaces call since it produces additional spaces
+              JPS CommaToSpace
+              JPS SingleSpaces
+              JPS MergeOrg        ; call only after Trimfont, SingleSpaces, HexToDollar
+              JPS MakeMSBLSB
+              JPS DoMnemonics
+              JPS DecByteToHex
+              JPS CutLabelDef     ; call after SingleSpaces, skips over pre-processor statements
+              JPS TrimFront       ; call after CutLabelDef
+                INW Line          ; move beyond the processed line...
+                LDI 10 PHS
+                LDA asm_lptr+0 PHS LDA asm_lptr+1 PHS
+                JPS length PLS
+                PLS ADB asm_lptr+1
+                PLS ADW asm_lptr INW asm_lptr
+                JPA p1loop        ; ... and look for a next line
+
+              ; *******************************************************************************
+
+PassTwo:      LDI '2' OUT JPS _WaitUART
+              LDA asmptr+0 STA asm_lptr+0      ; init destination line pointer
+              LDA asmptr+1 STA asm_lptr+1
+              LDI <labels STA labelptr+0       ; point back to first label found
+              LDI >labels STA labelptr+1
+              CLW Line INW Line                ; start with line number zero
+              LDI <Default STA PrgCount+0      ; prg start
+              LDI >Default STA PrgCount+1
+  p2nextline: LDA labelptr+1
+              CPA labelend+1 BNE validlabel    ; prüfe, ob es noch labels zu tracken gibt
+                LDA labelptr+0
+                CPA labelend+0 BEQ PassThree
+  validlabel: CLB num                     ; num: calculate line byte length
+              LDR asm_lptr                ; look at beginning of line
+              CPI 0 BEQ PassThree         ; after LF a zero is reached -> EOF
+                CPI '#' BNE p2nextelem    ; pre-processor valid ONLY at the start of a line
+                  INW asm_lptr LDR asm_lptr
+                  CPI 'o' BNE p2hopelem
+                    INW asm_lptr
+                    PHS LDA asm_lptr+0 PHS
+                        LDA asm_lptr+1 PHS
+                    JPS _HexToWord PLS PLS PLS
+                    LDS 0 CPI 0 BNE p2hopelem
+                      LDS -1 STA PrgCount+1
+                      LDS -2 STA PrgCount+0
+                      JPA p2hopelem
+  p2nextelem: LDR asm_lptr                ; look at start of element
+  p2next1:    CPI '$' BNE p2next2
+                INB num JPA p2hopelem
+  p2next2:    CPI '<' BNE p2next3
+                INB num JPA p2hopelem
+  p2next3:    CPI '>' BNE p2next4
+                INB num JPA p2hopelem
+  p2next4:    CPI 10 BEQ p2hopelem
+                LDI 2 ADB num             ; ... dann muss es ein label sein!
+  p2hopelem:  LDI ' ' PHS
+              LDA asm_lptr+0 PHS LDA asm_lptr+1 PHS
+              JPS getnext PLS
+              PLS STA asm_lptr+1 PLS STA asm_lptr+0
+              LDS -2 CPI ' ' BEQ p2nextelem
+              CPI 10 BNE PassThree                  ; last separator kein LF? dann war's 0!
+                LDR labelptr CPA Line+0 BNE p2nolabel0
+                  INW labelptr LDR labelptr
+                  CPA Line+1 BNE p2nolabel1
+                    LDA PrgCount+1 STR labelptr     ; replace label line number with address
+                    DEW labelptr
+                    LDA PrgCount+0 STR labelptr
+                    LDI 2 ADW labelptr
+                    LDI ' ' PHS
+                    LDA labelptr+0 PHS LDA labelptr+1 PHS       ; jump to next label
+                    JPS getnext PLS
+                    PLS STA labelptr+1 PLS STA labelptr+0
+                    JPA p2nolabel0
+  p2nolabel1:     DEW labelptr                      ; correct
+  p2nolabel0:   LDA num ADW PrgCount                ; add size for next line
+                INW Line                            ; goto next line number
+                JPA p2nextline
+
+              ; *******************************************************************************
+
+PassThree:    LDI '3' OUT JPS _WaitUART
+              LDA asmptr+0 STA asm_lptr+0     ; init asm line pointer
+              LDA asmptr+1 STA asm_lptr+1
+  p3nextelem: LDI 3 STA num                   ; num = 3: emit LSB MSB, = 1: emit only LSB, = 2: emit only MSB
+              LDA asm_lptr+0 STA ptra+0       ; ptra = working element pointer
+              LDA asm_lptr+1 STA ptra+1
+              LDR ptra CPI 0 BEQ PassFour     ; look at element start
+              CPI 10 BEQ p3hopelem            ; avoid landing on LF
+              CPI ' ' BEQ p3hopelem           ; avoid landing on (double) spaces
+              CPI '#' BEQ p3hopelem           ; avoid pre-processor stuff
+              CPI '$' BEQ p3hopelem           ; avoid hex values
+              CPI '<' BNE p3next1
+                LDI 1 JPA p3cutpre
+    p3next1:  CPI '>' BNE p3label             ; now it must be a label
+                LDI 2
+    p3cutpre:   STA num INW ptra              ; ptra points to the beginning of the actual label without < >
+  p3label:    LDI <labels STA labelptr+0                    ; search and replace <label> with LSB/MSB at asm_lptr
+              LDI >labels STA labelptr+1
+    p3loop:   LDR labelptr STA Line+0 INW labelptr          ; temp save label address in 'Line'
+              LDR labelptr STA Line+1 INW labelptr          ; labelptr now points to start of a label
+              LDA ptra+0 STA ptr+0 LDA ptra+1 STA ptr+1     ; preserve start of actual label in ptra, now use ptr
+              CLB numb                                      ; numb = label length = chars to cut
+              CLB numa                                      ; numa = number of differences
+    p3inner:  LDR labelptr
+              CPI ' ' BEQ p3labend                          ; each label in the list is terminated with a space
+                CPR ptr BEQ p3okay
+                  INB numa                                  ; count up mismatches
+      p3okay:   INB numb INW labelptr INW ptr               ; investigate next char
+                JPA p3inner
+    p3labend: LDA numa CPI 0 BNE p3notok                    ; gab es mismatches?
+                LDR ptr CPI 33 BCC p3elemterm               ; END OF LABEL? 0-32 = valides Ende OHNE offset
+                  STA numa INB numb                         ; numa: sign character
+    p3dec:        INW ptr LDR ptr
+                  CPI ':' BCS p3notok
+                    SBI '0' BCC p3notok                     ; offset only 0-9
+                      STA numc INB numb
+                      INW ptr LDR ptr
+                      CPI ':' BCS p3dochok
+                        SBI '0' BCC p3dochok                ; offset only 0-9
+                          PHS LDA numc LSL STA numc
+                          LSL LSL ADB numc                  ; num = num * 10
+                          PLS ADB numc INB numb             ; num = num + digit
+    p3dochok:     LDA numa CPI '+' BEQ p3plus               ; folgt in der Referenz ein Offset?
+                  CPI '-' BNE p3notok                       ; alles andere => ERROR
+                    NEB numc                                ; negate
+    p3plus:       LDA numc ADW Line
+
+  p3elemterm:     LDA num CPI 3 BNE p3onlyone               ; ptr has reached a valid terminator
+                    LDI 5 SBB numb
+    p3onlyone:    LDI 2 SBB numb                            ; remember additional place from '<'
+                  BMI p3insert BEQ p3fits
+                    LDA numb PHS LDI 0 PHS                  ; etwas ausschneiden
+                    LDA asm_lptr+0 PHS
+                    LDA asm_lptr+1 PHS
+                    JPS cutchars PLS PLS PLS PLS            ; space nach label ist ggfs. noch da!
+                    JPA p3fits
+    p3insert:     LDA numb NEG PHS LDI 0 PHS                ; etwas einfügen
+                  LDA asm_lptr+0 PHS
+                  LDA asm_lptr+1 PHS
+                  JPS insertplaces PLS PLS PLS PLS
+    p3fits:       LDI '.' OUT JPS _WaitUART
+                  LDA num LSR STA num BCC p3testMSB         ; insert LSB?
+                    LDI '$' STR asm_lptr INW asm_lptr
+                    LDA Line+0 PHS PHS JPS ByteToHex        ; to pull from stack: left char, right char
+                    PLS STR asm_lptr INW asm_lptr           ; insert left char
+                    PLS STR asm_lptr INW asm_lptr           ; insert left char
+                    LDA num CPI 0 BEQ p3hopelem             ; folgt noch ein MSB?
+                      LDI ' ' STR asm_lptr INW asm_lptr
+    p3testMSB:    LDA num LSR BCC p3hopelem                 ; insert MSB?
+                    LDI '$' STR asm_lptr INW asm_lptr
+                    LDA Line+1 PHS PHS JPS ByteToHex        ; to pull from stack: left char, right char
+                    PLS STR asm_lptr INW asm_lptr           ; insert left char
+                    PLS STR asm_lptr INW asm_lptr           ; insert left char
+                    JPA p3hopelem
+    p3notok:  INW labelptr                                  ; now points to next label list entry
+              LDA labelptr+0 CPA labelend+0 BNE p3loop
+                LDA labelptr+1 CPA labelend+1 BNE p3loop
+  p3hopelem:  LDI ' ' PHS                                   ; hop behind space or LF separator
+              LDA asm_lptr+0 PHS LDA asm_lptr+1 PHS
+              JPS getnext PLS
+              PLS STA asm_lptr+1 PLS STA asm_lptr+0
+              JPA p3nextelem
+
+PassFour:     LDI '4' OUT JPS _WaitUART             ; clean out additional spaces behind '#o8000 label:'
+              LDA asmptr+0 STA ptr+0
+              LDA asmptr+1 STA ptr+1
+  p4loop:     LDR ptr CPI 0 BEQ PassFive
+              CPI ' ' BNE p4nospace                 ; cut ' ' before separator ' ', LF, 0
+                INW ptr LDR ptr
+                CPI ' ' BEQ p4cutspace
+                CPI 10 BEQ p4cutspace
+                CPI 0 BEQ p4cutspace
+                  JPA p4loop
+  p4cutspace:   DEW ptr
+                LDI 1 PHS LDI 0 PHS
+                LDA ptr+0 PHS LDA ptr+1 PHS
+                JPS cutchars PLS PLS PLS PLS
+                JPA p4loop
+  p4nospace:  INW ptr JPA p4loop
+
+PassFive:     LDI '5' OUT JPS _WaitUART
+              LDA asmptr+0 STA asm_lptr+0           ; ASSEMBLING
+              LDA asmptr+1 STA asm_lptr+1           ; init destination line pointer
+              CLW Line INW Line
+              LDI 1 STA DoEmit
+              LDI <Default STA _MemAddr+0 STA PrgCount+0
+              LDI >Default STA _MemAddr+1 STA PrgCount+1
+  p4nextline: LDR asm_lptr                ; look at beginning of line
+              CPI 0 BEQ PassEnd           ; after LF a zero is reached -> EOF
+              CPI 10 BEQ p4hopelem        ; hop over empty lines
+                CPI '#' BNE p4nextelem    ; pre-processor ONLY at the start of a line
+                  INW asm_lptr LDR asm_lptr
+                  CPI 'o' BNE p4prep2     ; #org
+                    INW asm_lptr
+                    PHS LDA asm_lptr+0 PHS
+                        LDA asm_lptr+1 PHS
+                    JPS _HexToWord PLS PLS PLS
+                    LDS 0 CPI 0xf0 BEQ LineError
+                      LDS -1 STA PrgCount+1
+                      LDS -2 STA PrgCount+0
+                      LDA DoEmit CPI 1 BNE p4hopelem
+                        LDS -1 STA _MemAddr+1
+                        LDS -2 STA _MemAddr+0
+                        JPA p4hopelem
+    p4prep2:      CPI 'b' BNE p4prep3     ; #begin
+                    LDI 1 STA DoEmit
+                    JPA p4hopelem
+    p4prep3:      CPI 'e' BNE LineError   ; #end
+                    CLB DoEmit
+                    JPA p4hopelem
+  p4nextelem: LDR asm_lptr CPI '$' BNE LineError           ; so there MUST be a '$' at the start of this element
+                INW asm_lptr LDR asm_lptr   ; look at hex data
+                CPI 'g' BCS LineError       ; above f? -> melde Fehler!
+                CPI 'a' BCS p4good1         ; a...f?
+                CPI ':' BCS LineError       ; above 9? -> Separator: Zurück, wenn was da ist, sonst übergehen.
+                CPI '0' BCC LineError       ; 0...9?
+  p4good1:        INW asm_lptr LDR asm_lptr
+                  CPI 'g' BCS LineError       ; above f? -> melde Fehler!
+                  CPI 'a' BCS p4good2         ; a...f?
+                  CPI ':' BCS LineError       ; above 9? -> Separator: Zurück, wenn was da ist, sonst übergehen.
+                  CPI '0' BCC LineError       ; 0...9?
+  p4good2:          INW asm_lptr LDR asm_lptr
+                    CPI 0x21 BCS LineError
+              LDI 2 SBW asm_lptr
+              PHS LDA asm_lptr+0 PHS
+                  LDA asm_lptr+1 PHS
+              JPS _HexToWord PLS PLS PLS
+                LDA DoEmit CPI 1 BNE p4hopelem
+                  LDS -2 STR _MemAddr INW _MemAddr   ; ... EMIT BYTES HERE ...
+  p4hopelem:  LDI ' ' PHS
+              LDA asm_lptr+0 PHS LDA asm_lptr+1 PHS
+              JPS getnext PLS
+              PLS STA asm_lptr+1 PLS STA asm_lptr+0
+              LDS -2 CPI ' ' BEQ p4nextelem
+              CPI 10 BNE PassEnd                             ; last separator kein LF? dann war's 0!
+                INW Line                               ; goto next line number
+                JPA p4nextline
+
+PassEnd:      LDI 10 OUT JPS _WaitUART
+              JPA _Prompt
+
+LineError:    LDI <LineMsg PHS LDI >LineMsg PHS
+              JPS _Print PLS PLS
+              LDA Line+0 PHS LDA Line+1 PHS
+              JPS Print999 PLS PLS
+              LDI ':' OUT JPS _WaitUART
+              LDI ' ' OUT JPS _WaitUART
+              LDI '"' OUT JPS _WaitUART
+  errorloop:  LDR asm_lptr CPI 11 BCC backtoos
+                OUT JPS _WaitUART
+                INW asm_lptr JPA errorloop
+  backtoos:   LDI '"' OUT JPS _WaitUART
+              LDI 10 OUT JPS _WaitUART
+              ; LDA asmptr+0 PHS LDA asmptr+1 PHS       ; DEBUG
+              ; JPS _Print PLS PLS
+              LDI 0xfe STA 0xffff
+              JPA _Prompt
+
+FileError:    LDI <FileMsg PHS LDI >FileMsg PHS
+              JPS _Print PLS PLS
+              LDI 0xfe STA 0xffff
+              JPA _Prompt
+
+IntroText:    'Minimal Assembler 1.5', 10, 0
+FileMsg:      'File not found.', 10, 0
+LineMsg:      10, 'ERROR in line ', 0
+
+SetPtrLine:   LDA asm_lptr+0 STA ptr+0
+              LDA asm_lptr+1 STA ptr+1
+              RTS
+
+DelComments:  JPS SetPtrLine           ; change semicolon to LF
+  step1loop:  LDR ptr CPI 10 BEQ step1ret
+                CPI 59 BEQ itssemi     ; semicolon
+                  INW ptr JPA step1loop
+  itssemi:    LDI 10 STR ptr
+  step1ret:   RTS
+
+CommaToSpace: JPS SetPtrLine           ; change comma to space
+  step2loop:  LDR ptr CPI 10 BEQ step2ret
+                CPI 44 BNE nomatch2     ; comma
+                  LDI ' ' STR ptr
+  nomatch2:     INW ptr JPA step2loop
+  step2ret:   RTS
+
+HexToDollar:  JPS SetPtrLine           ; change 0x to $
+  step3loop:  LDR ptr CPI 10 BEQ step3ret
+                CPI '0' BNE nomatch3
+                  INW ptr LDR ptr CPI 'x' BNE nomatch3b
+                    DEW ptr
+                    LDI 1 PHS LDI 10 PHS
+                    LDA ptr+0 PHS LDA ptr+1 PHS
+                    JPS cutchars PLS PLS PLS PLS
+                    LDI '$' STR ptr
+  nomatch3:       INW ptr
+  nomatch3b:      JPA step3loop
+  step3ret:   RTS
+
+MergeOrg:     JPS SetPtrLine           ; merge #org $8000 into #o8000
+              LDR ptr CPI '#' BNE steporet
+                INW ptr LDR ptr CPI 'o' BNE steporet
+                  INW ptr LDI 4 PHS LDI 10 PHS     ; cut 'rg $'
+                  LDA ptr+0 PHS LDA ptr+1 PHS
+                  JPS cutchars PLS PLS PLS PLS
+  steporet:   RTS
+
+ExplStrings:  JPS SetPtrLine           ; need calling of SingleSpace
+              CLB num
+  step4loop:  LDR ptr CPI 10 BEQ step4ret
+                CPI 39 BNE nomatch4         ; '
+                  LDI ' ' STR ptr
+                  INB num JPA step4off
+  nomatch4:     LDA num LSR BCC step4off    ; umwandeln nur, wenn num ungerade ist
+                  LDR ptr PHS PHS JPS ByteToHex
+                  LDI '$' STR ptr INW ptr
+                  LDI 10 PHS LDA ptr+0 PHS LDA ptr+1 PHS
+                  JPS insertchar PLS PLS PLS PLS INW ptr
+                  LDI 10 PHS LDA ptr+0 PHS LDA ptr+1 PHS
+                  JPS insertchar PLS PLS PLS PLS INW ptr
+                  LDI ' ' PHS LDI 10 PHS
+                  LDA ptr+0 PHS LDA ptr+1 PHS
+                  JPS insertchar PLS PLS PLS PLS
+  step4off:     INW ptr
+                JPA step4loop
+  step4ret:   RTS
+
+TrimFront:    JPS SetPtrLine           ; trim leading spaces
+              CLB num                  ; count spaces at front
+  step5loop:  LDR ptr CPI ' ' BNE step5ret
+                INB num INW ptr JPA step5loop
+  step5ret:   LDA num PHS LDI 10 PHS
+              LDA asm_lptr+0 PHS LDA asm_lptr+1 PHS
+              JPS cutchars PLS PLS PLS PLS
+              RTS
+
+TrimBack:     JPS SetPtrLine           ; trim trailing space
+              LDI 10 PHS LDA ptr+0 PHS LDA ptr+1 PHS
+              JPS length PLS PLS
+              PLS DEC BCC step6ret ADW ptr      ; if existing, go back to last char of this line
+  step6loop:  LDR ptr CPI ' ' BNE step6ret
+                LDI 10 STR ptr DEW ptr
+                JPA step6loop          ; in der 1. Zeile trifft dies ggfs. auf 0 termination vom textfile -> i.O.
+  step6ret:   RTS
+
+SingleSpaces: JPS SetPtrLine           ; change spaces to single space
+  step7loop:  LDR ptr CPI 10 BEQ step7ret
+                CPI ' ' BNE nomatch7
+                  INW ptr LDR ptr CPI 33 BCS step7loop
+                    DEW ptr         ; back to the space
+                    LDI 1 PHS LDI 10 PHS
+                    LDA ptr+0 PHS LDA ptr+1 PHS
+                    JPS cutchars PLS PLS PLS PLS
+                    JPA step7loop
+  nomatch7:       INW ptr JPA step7loop
+  step7ret:   RTS
+
+MakeMSBLSB:   JPS SetPtrLine           ; change $mmll to $ll $mm
+  step8loop:  LDR ptr CPI 10 BEQ step8ret
+                CPI '$' BNE nomatch8
+                  LDI ' ' PHS LDA ptr+0 PHS LDA ptr+1 PHS
+                  JPS length PLS PLS PLS CPI 5 BNE nomatch8
+                    LDI 4 ADW ptr
+                    LDR ptr PHS DEW ptr LDR ptr PHS
+                    LDI 2 PHS LDI 10 PHS
+                    LDA ptr+0 PHS LDA ptr+1 PHS
+                    JPS cutchars PLS PLS PLS PLS
+                    LDI 3 SBW ptr
+                    LDI '$' PHS LDI 10 PHS
+                    LDA ptr+0 PHS LDA ptr+1 PHS
+                    JPS insertchar PLS PLS PLS PLS INW ptr
+                    LDI 10 PHS LDA ptr+0 PHS LDA ptr+1 PHS
+                    JPS insertchar PLS PLS PLS PLS INW ptr
+                    LDI 10 PHS LDA ptr+0 PHS LDA ptr+1 PHS
+                    JPS insertchar PLS PLS PLS PLS INW ptr
+                    LDI ' ' PHS LDI 10 PHS
+                    LDA ptr+0 PHS LDA ptr+1 PHS
+                    JPS insertchar PLS PLS PLS PLS
+                    LDI 3 ADW ptr
+  nomatch8:   INW ptr
+              JPA step8loop
+  step8ret:   RTS
+
+DoMnemonics:  JPS SetPtrLine           ; change mnemonic to $xx
+  step9loop:  LDR ptr CPI 10 BEQ step9ret
+                CPI 'A' BCC nomatch9 CPI '[' BCS nomatch9                ; first char upper case?
+                  LDA _Mnemonics+0 STA ptrb+0
+                  LDA _Mnemonics+1 STA ptrb+1                            ; ptrb = start of mnemonic table
+                  CLB num
+  trymnemonic:    CLB numa
+                  LDA ptr+0 STA ptra+0 LDA ptr+1 STA ptra+1              ; ptra = start of element
+  trymn1:           LDR ptra CPR ptrb BNE trymn2
+                      INB numa
+  trymn2:           INW ptra INW ptrb
+                    LDR ptra CPR ptrb BNE trymn3
+                      INB numa
+  trymn3:           INW ptra INW ptrb
+                    LDR ptra CPR ptrb BNE evalmn
+                      INB numa
+  evalmn:           INW ptrb                                              ; point to next mnemonic
+                    LDA numa CPI 3 BEQ mnmatch
+                      INB num CPI 64 BCC trymnemonic
+  nomatch9:   LDI ' ' PHS LDA ptr+0 PHS LDA ptr+1 PHS
+              JPS getnext PLS
+              PLS STA ptr+1 PLS STA ptr+0
+              LDS -2 CPI ' ' BEQ step9loop                               ; only continue if separator was space
+                JPA step9ret
+  mnmatch:    LDI '$' STR ptr INW ptr
+              LDA num PHS PHS JPS ByteToHex
+              PLS STR ptr INW ptr
+              PLS STR ptr LDI 2 SBW ptr
+              JPA nomatch9
+  step9ret:   RTS
+
+CutLabelDef:  LDR asm_lptr CPI '#' BNE cld_nopre            ; skip over pre-processor statement at line start
+                LDI ' ' PHS
+                LDA asm_lptr+0 PHS LDA asm_lptr+1 PHS
+                JPS getnext PLS
+                PLS STA asm_lptr+1 PLS STA asm_lptr+0
+                LDS -2 CPI ' ' BEQ cld_nopre                ; ist noch ein Element da oder schon LF?
+                  DEW asm_lptr                              ; do not skip over LF
+  cld_nopre:  JPS SetPtrLine
+  labeldeflp: LDR ptr CPI 10 BEQ step10ret
+                CPI ':' BEQ founddef
+                  INW ptr JPA labeldeflp
+  founddef:   LDA Line+0 STR labelend INW labelend          ; store line number of the label definition
+              LDA Line+1 STR labelend INW labelend
+              LDA asm_lptr+1 SBB ptr+1                      ; ptr = length of label without :
+              LDA asm_lptr+0 SBW ptr
+              LDA labelend+0 PHS LDA labelend+1 PHS         ; destination
+              LDA asm_lptr+0 PHS LDA asm_lptr+1 PHS         ; src
+              LDA ptr+0 PHS LDA ptr+1 PHS                   ; length
+              JPS _MemMove LDI 6 ADW 0xffff                 ; copy the label to the table
+              LDA ptr+0 ADW labelend                        ; put a space behind the label
+              LDI ' ' STR labelend                          ; put space separator between labels
+              INW labelend                                  ; points to the end of the label table
+              LDA ptr+0 INC PHS LDI 10 PHS                  ; cut out the definition
+              LDA asm_lptr+0 PHS LDA asm_lptr+1 PHS
+              JPS cutchars PLS PLS PLS PLS
+  step10ret:  RTS
+
+DecByteToHex: JPS SetPtrLine
+  step11loop: LDR ptr CPI 10 BEQ step11ret                  ; is there at least one element at ptr?
+                LDA ptr+0 STA ptra+0 LDA ptr+1 STA ptra+1   ; ptra = working pointer, ptr = start of element
+                CLB num   ; result
+                CLB numa  ; sign 0: pos, 1: neg
+                CLB numb  ; identified dec bytes
+                LDR ptra CPI '-' BNE p11digit
+                  INB numb INB numa INW ptra                ; store and consume - and advance
+  p11digit:     LDR ptra CPI ':' BCS p11nodigit
+                  SBI '0' BCC p11nodigit
+                    PHS LDA num LSL STA num
+                    LSL LSL ADB num                         ; num = num * 10
+                    PLS ADB num                             ; num = num + digit
+                    INB numb INW ptra                       ; consume digit
+                    JPA p11digit
+  p11nodigit: LDA numb CPI 0 BEQ nomatch11                  ; are there any valid dec bytes consumed?
+              DEB numa BNE p11pos                           ; check for neg sign
+                NEB num                                     ; ... and negate
+  p11pos:     LDA numb PHS LDI 10 PHS                       ; cut out the dec number starting at ptr
+              LDA ptr+0 PHS LDA ptr+1 PHS
+              JPS cutchars PLS PLS PLS PLS
+              LDA num PHS PHS JPS ByteToHex                 ; save PLS PLS for later
+              LDI '$' PHS LDI 10 PHS
+              LDA ptr+0 PHS LDA ptr+1 PHS
+              JPS insertchar PLS PLS PLS PLS INW ptr
+              LDI 10 PHS LDA ptr+0 PHS LDA ptr+1 PHS
+              JPS insertchar PLS PLS PLS PLS INW ptr
+              LDI 10 PHS LDA ptr+0 PHS LDA ptr+1 PHS
+              JPS insertchar PLS PLS PLS PLS
+  nomatch11:  LDI ' ' PHS LDA ptr+0 PHS LDA ptr+1 PHS
+              JPS getnext PLS
+              PLS STA ptr+1 PLS STA ptr+0
+              LDS -2 CPI ' ' BEQ step11loop                 ; only continue if separator was space
+  step11ret:    RTS
+
+; Converts a byte value <val> to HEX chars
+; push: <val>, #
+; pull: 1st char, 2nd char
+ByteToHex:      LDS 4 LSR LSR LSR LSR  ; read value from stack
+                ADI '0' CPI 58 BCC GHex8msn
+                  ADI 39               ; mache einen Buchstaben draus
+  GHex8msn:     STS 3
+                LDS 4 LSL LSL LSL LSL LSL
+                ROL ROL ROL ROL
+                ADI '0' CPI 58 BCC GHex8lsn
+                  ADI 39
+  GHex8lsn:     STS 4
+                RTS
+
+; calculate the length of a string (excluding the first char <= <terminator>)
+; push: <terminator>, str_lsb, str_msb
+; pull: #, len_MSB, len_LSB
+length:         LDS 3 STA str_len+1
+                LDS 4 STA str_len+0
+  lenloop:      LDS 5 CPR str_len BCS lenende  ; load terminator
+                  INW str_len JPA lenloop
+  lenende:      LDS 3 SBB str_len+1            ; subtract start address
+                LDS 4 SBW str_len
+                LDA str_len+1 STS 4
+                LDA str_len+0 STS 5
+                RTS
+
+; returns address of next element after char <= <terminator>
+; push: <terminator>, addr_lsb, addr_msb
+; pull: <real terminator>, next_MSB, next_LSB
+getnext:        LDS 3 STA str_len+1
+                LDS 4 STA str_len+0
+  getloop:      LDS 5 CPR str_len BCS getende  ; char <= terminator
+                  INW str_len JPA getloop
+  getende:      LDR str_len STS 3              ; store the real terminator (for caller accessible via LDS -2)
+                INW str_len                    ; move over terminator
+                LDA str_len+1 STS 4            ; return next address
+                LDA str_len+0 STS 5
+                RTS
+
+; Cuts out <n> characters from a <terminator>-terminated string
+; The caller ensures that there are at least <n> chars to cut.
+; push: <n>, <term>, string_lsb, string_msb
+; pull: #, #, #, #
+cutchars:       LDS 3 STA str_dptr+1 STA str_sptr+1   ; retrieve address of the 1. char to cut
+                LDS 4 STA str_dptr+0 STA str_sptr+0
+                LDS 6 ADW str_sptr
+  cut_loop:     LDR str_sptr STR str_dptr
+                LDS 5 CPR str_sptr BEQ cut_done
+                  INW str_sptr INW str_dptr JPA cut_loop
+  cut_done:     RTS
+
+; Inserts a <char> into a <terminator>-terminated string
+; push: <char>, <terminator> string_lsb, string_msb
+; pull: #, #, #, #
+insertchar:     LDS 3 STA str_sptr+1
+                LDS 4 STA str_sptr+0
+  ic_endloop:   LDS 5 CPR str_sptr BEQ ic_end
+                  INW str_sptr JPA ic_endloop
+  ic_end:       LDA str_sptr+0 STA str_dptr+0
+                LDA str_sptr+1 STA str_dptr+1
+                INW str_dptr
+  ic_movloop:   LDR str_sptr STR str_dptr
+                LDS 4 CPA str_sptr+0 BNE ic_movon
+                  LDS 3 CPA str_sptr+1 BEQ ic_movend
+  ic_movon:         DEW str_sptr DEW str_dptr
+                    JPA ic_movloop
+  ic_movend:    LDS 6 STR str_sptr
+                RTS
+
+; Inserts <places> chars into a <terminator>-terminated string
+; push: <places>, <terminator> string_lsb, string_msb
+; pull: #, #, #, #
+insertplaces:   LDS 3 STA str_sptr+1
+                LDS 4 STA str_sptr+0
+  ip_endloop:   LDS 5 CPR str_sptr BEQ ip_end
+                  INW str_sptr JPA ip_endloop
+  ip_end:       LDA str_sptr+0 STA str_dptr+0
+                LDA str_sptr+1 STA str_dptr+1
+                LDS 6 ADW str_dptr
+  ip_movloop:   LDR str_sptr STR str_dptr
+                LDS 4 CPA str_sptr+0 BNE ip_movon
+                  LDS 3 CPA str_sptr+1 BEQ ip_movend
+  ip_movon:         DEW str_sptr DEW str_dptr
+                    JPA ip_movloop
+  ip_movend:    RTS
+
+; print number 000 - 999
+; push: number_lsb, number_msb
+; pull: #, #
+; modifies: str_len, num
+Print999:       LDS 3 STA str_len+1   ; PRINT A POSITIVE NUMBER 000 - 999
+                LDS 4 STA str_len+0
+                LDI '0' STA num
+  p100loop:     LDI 100 SBW str_len BCC p99end100
+                  INB num JPA p100loop
+  p99end100:    LDI 100 ADW str_len
+                LDA num OUT JPS _WaitUART
+                LDI '0' STA num
+  p10loop:      LDI 10 SBB str_len+0 BCC p99end10
+                  INB num JPA p10loop
+  p99end10:     LDA num OUT JPS _WaitUART
+                LDI 58 ADB str_len+0
+                LDA str_len+0 OUT JPS _WaitUART
+                RTS
+
+#end                          ; variables used by the assembler
+
+srcptr:         0xffff
+labelend:       0xffff        ; pointer to the end of the label table (valid after pass 1)
+labelptr:       0xffff
+asmptr:         0xffff        ; start of the bytecode working area of the assembler (after sourcefile)
+asm_lptr:       0xffff        ; line pointer
+src_lptr:       0xffff
+Line:           0xffff
+PrgCount:       0xffff
+DoEmit:         0xff
+ptr:            0xffff
+ptra:           0xffff
+ptrb:           0xffff
+num:            0xff
+numa:           0xff
+numb:           0xff
+numc:           0xff
+str_sptr:       0xffff        ; working pointers of string functions
+str_dptr:       0xffff
+str_len:        0xffff
+
+#end                          ; Labels used by the Assembler
+
+#org 0x9000     EditorSrc:    ; default beginning of the src code
+#org 0xc000     Default:      ; default beginning of the program
+#org 0xe000     labels:       ; beginning of the temp buffer area
+
+#org 0xf003     _Prompt:      ; OS entry point for line input prompt
+#org 0xf006     _Print:       ; Prints a null-terminated string
+#org 0xf009     _PrintHex:    ; Prints a byte in HEX format
+#org 0xf00c     _WaitUART:    ; Waits for UART transmission
+#org 0xf015     _MemMove:     ; Moves N bytes from A.. to C..
+#org 0xf018     _FindFile:    ; Returns a pointer to a stored file
+#org 0xf01b     _Mnemonics:   ; Pointer to the mnemonic table
+#org 0xf01f     _HexToWord:   ; converts a hex string to a word
+#org 0xfeb0     _MemAddr:     ; current memory address
+#org 0xfeb2     _ParsePtr:    ; Zeiger auf das letzte eingelesene Zeichen (to be reset at startup)
+
+; -------------------------------------------------------------------------------
+; Copyright (c) 2021 Carsten Herting (slu4)
+; -------------------------------------------------------------------------------
+; MIT LICENSE
+; Permission is hereby granted, free of charge, to any person obtaining a copy of
+; this software and associated  documentation files  (the "Software"), to deal in
+; the Software without  restriction, including  without  limitation the rights to
+; use, copy,  modify, merge, publish, distribute, sublicense,  and/or sell copies
+; of the Software, and  to permit persons to whom the Software is furnished to do
+; so, subject to the following conditions:
+; The above copyright notice and  this permission notice shall be included in all
+; copies or substantial portions of the Software.
+; THE  SOFTWARE  IS PROVIDED "AS IS",  WITHOUT  WARRANTY OF  ANY KIND, EXPRESS OR
+; IMPLIED,  INCLUDING  BUT  NOT  LIMITED  TO  THE  WARRANTIES OF MERCHANTABILITY,
+; FITNESS FOR  A PARTICULAR  PURPOSE AND  NONINFRINGEMENT. IN NO  EVENT SHALL THE
+; AUTHORS  OR  COPYRIGHT  HOLDERS  BE  LIABLE FOR  ANY  CLAIM, DAMAGES  OR  OTHER
+; LIABILITY,  WHETHER IN AN ACTION  OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+; OUT OF OR IN  CONNECTION WITH  THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+; SOFTWARE.
+; -------------------------------------------------------------------------------

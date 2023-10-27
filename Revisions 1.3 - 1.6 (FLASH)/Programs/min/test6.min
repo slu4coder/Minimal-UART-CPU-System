@@ -1,0 +1,18 @@
+def test()
+  print "a=", a, "\n"
+  # print b										# should produce an error
+
+print "LOCAL TEST\n"
+a = 10												# global variable
+
+if 1>0
+  b = 20											# local variable inside 'if'
+  test()
+  if 1>0
+    c = 5
+    print "b=", b, "\n"
+    print "c=", c, "\n"
+  print "b=", b, "\n"
+
+# print b											# should produce an error
+print "END\n"

@@ -1,0 +1,11 @@
+def change(&a)
+  a = a + 2
+  meine(a)
+
+def meine(&b)
+  b = b + 1
+
+z = 10 print z
+change(z) print z
+
+# Ausdruck: 10, 13
