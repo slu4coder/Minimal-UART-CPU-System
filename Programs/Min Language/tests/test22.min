@@ -1,9 +1,0 @@
-def cursor(x)
-  print x, " should be 11\n"
-
-def shape(x)
-  print x, " should be 10\n"
-  cursor(x+1)
-  print x, " should still be 10\n"
-
-shape(10)

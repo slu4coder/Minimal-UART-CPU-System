@@ -1,4 +1,0 @@
-print "RANDOM TEST\n"
-
-r = 0
-while r != 255 r = rnd() print r, " "

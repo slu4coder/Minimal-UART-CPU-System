@@ -1,5 +1,0 @@
-include "std.min"
-
-cls()
-pos(10, 10)
-print "Hello, World!"
