@@ -1,7 +1,0 @@
-a = [  10, 11, 20 ,22 , 30, 33 ,  0 , 44, 50 , 55 ]
-
-print "CONCATENATION TEST\n"
-a = a + a
-i=0
-while i < len(a) print a[ i ] , " " i=i+1
-

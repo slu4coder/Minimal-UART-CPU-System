@@ -1,7 +1,0 @@
-def square(num)
-  return num * num
-
-x=1
-while x <= 256
-  print x, ":", square(x), " "
-  x=x+1

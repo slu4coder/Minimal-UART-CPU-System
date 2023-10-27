@@ -1,7 +1,0 @@
-def test(  & a  , & b )       # a und b sind Referenzen
-  a = b                       # b wird als Expression evaluiert (20) und in der Referenz a auf x gespeichert
-  b = b + 1                   # 21 wird in der Refernz b auf y gespeichert
-
-x = 10; y = 20
-test( x , y )
-print x  , y                    # 20, 21
