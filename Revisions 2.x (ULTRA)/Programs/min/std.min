@@ -1,0 +1,73 @@
+def clear(): print("\e[H\e[J")
+
+def hide(): print("\e[?25l")
+
+def show(): print("\e[?25h")
+
+char rndX=18; char rndA=10; char rndB=37; char rndC=144
+
+# returns pseudo-random chars -128..127 by hand
+def random():
+  rndX = rndX + 1
+  rndA = rndA xor rndC xor rndX
+  rndB = rndB + rndA
+  rndC = (rndC + (rndB >> 1 and 0x7f)) xor rndA
+  return rndC
+
+# returns the element size of a string
+def strlen(char s): char e; return &e - &s
+
+# returns the element size of an int array
+def intlen(int i): char e; return &e - &i >> 1
+
+# compare two strings (0: equal)
+def strcmp(char s1, char s2):
+  int l1 = &s2 - &s1
+  if l1 != &l1 - &s2: return -1
+  int i=0
+  while i < l1:
+    if s1[i] != s2[i]: return -1
+    i+=1
+  return 0
+
+# convert an int to string
+def str(int n):
+  char v
+  if n == 0: return "0"
+  if n > 0: v = ""
+  else: n = -n; v = "-"
+  char s = s[|5]
+  int i = 5
+  while n>0:
+    i-=1
+    int d = n/10
+    s[i] = 48+(n-d*10)
+    n = d
+  return v_s[i|5]
+
+#convert a char number to a string
+def fstr(char n):
+  char d = n / 10
+  char e = 48 + n - d*10
+  char z = 48 + d
+  return z_e
+
+# set the cursor position by hand
+def position(char x, char y):
+  print("\e["_fstr(x+1)_"G\e["_fstr(y+1)_"d");
+
+# returns a signed random number byte via API
+def rnd():
+  call(0xf009, 0) # JPS _Random
+  char r @ 0xff02
+  return r
+
+# set the cursor position via API
+def pos(char x, char y):
+  char stack @ 0xff00
+  char s @ 0xffff
+  int sp = s and 0xff
+  stack[sp-3] = x
+  call(0xf03c, 26) # -25-1 # JPS _CursorX
+  stack[sp-3] = y
+  call(0xf03f, 26) # -25-1 # JPS _CursorY
