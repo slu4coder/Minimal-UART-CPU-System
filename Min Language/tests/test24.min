@@ -1,0 +1,20 @@
+# LOCAL AND GLOBAL VARIABLES
+
+def test()
+  y = 100               # local variable      stored as y@1
+  print x               # global variable 
+
+def increment(&r)
+  r=r+1                 # reference variable  stored as r@1 
+
+x = 1                   # global variable     stored as 'x'
+if x == 1
+  y = 0                 # local variable      stored as y@0
+  while y<10
+    y = y + 1
+    increment(y)
+    a = 10              # local variable      stored as a@0 only inside while
+    test()
+    print "."
+
+# print a               # ERROR: a is undefined!

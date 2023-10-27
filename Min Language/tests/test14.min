@@ -1,0 +1,5 @@
+print "SLICING TEST\n"
+
+a = "Hello, slu4"
+c = a[0..8][0..4][2..4]
+print a, " -> ", c, "\n"

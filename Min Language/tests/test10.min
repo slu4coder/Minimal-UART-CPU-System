@@ -1,0 +1,9 @@
+print "ELEMENT ACCESS MATH\n"
+
+a = [10, 20, 30, 40]
+
+if 5+a[1] == 25 print "WORKS\n"
+else print "PROBLEM\n"
+
+if a[2]+5 == 35 print "WORKS\n"
+else print "PROBLEM\n"

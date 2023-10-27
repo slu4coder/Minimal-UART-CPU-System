@@ -1,0 +1,6 @@
+def cls() print "\e[H\e[J"
+def pos(x, y) print "\e[" + str(x) + "G\e[" + str(y) + "d"
+
+cls()
+pos(10, 10)
+print "Hello, World!"
