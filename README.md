@@ -1,12 +1,12 @@
 # Minimal UART CPU System
 
-![test](https://github.com/slu4coder/Minimal-UART-CPU-System/assets/52576999/0edf149a-9e37-47e4-8fc6-2b422d1a01ea)
+NEWS: Minimal CPU 2.0 'Ultra' is now running in at 10MHz and may well be the fastest 8-bit general purpose 74HC logic breadboard computer to this date.
 
-NEW: Check out the full 'Minimal 64 Home Computer': https://github.com/slu4coder/The-Minimal-64-Home-Computer
-
-NEW: Minimal CPU 1.6 'Redux' is now running in beast mode at up to 8.3MHz.
+NEWS: Check out the full 'Minimal 64 Home Computer' with VGA and PS/2 at https://github.com/slu4coder/The-Minimal-64-Home-Computer
 
 ![redux](https://github.com/slu4coder/Minimal-UART-CPU-System/assets/52576999/acc415e3-ad05-4efc-9c1f-75901d5e7321)
+
+![test](https://github.com/slu4coder/Minimal-UART-CPU-System/assets/52576999/0edf149a-9e37-47e4-8fc6-2b422d1a01ea)
 
 ● Build your own 'Minimal CPU System' on breadboards: https://www.youtube.com/watch?v=Gz1VVOsNn_8
 
