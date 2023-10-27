@@ -1,9 +1,0 @@
-; example program printing out pressed keys
-
-        *=$0000			; set PC to start address of program
-
-start:  WIN					; wait for keyboard input -> A
-				OUT					; send A to terminal
-        JPA start		; jump to 'start'
-
-				*=$0000			; set PC back to zero
