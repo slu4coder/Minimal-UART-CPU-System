@@ -1,0 +1,24 @@
+					*=$0000
+
+start:  	LDI 27 OUT					; ESC sequence for "home"
+					LDI '[' OUT			
+					LDI 'H' OUT			
+					LDI 27 OUT					; ESC sequence for "clear screen"			
+					LDI '[' OUT			
+					LDI 'J' OUT
+				
+					LDI 20 STA yreg
+yloop:		DEA yreg
+end:			BEQ end							; halts the program if finished
+						LDI 30 STA xreg
+xloop:			DEA xreg		
+						BEQ lineend
+							LDI '#' OUT
+							JPA xloop
+lineend:		LDI 10 OUT				; send carriage return
+						JPA yloop
+															
+xreg:			0
+yreg:     0
+
+					*=$0000
