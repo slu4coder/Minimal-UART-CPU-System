@@ -1,10 +1,12 @@
+# LATEST NEWS
+
+Full 'Minimal 64 Home Computer' released with VGA and PS/2: https://github.com/slu4coder/The-Minimal-64-Home-Computer
+
+Minimal CPU 2.0 'Ultra' is now running at 10MHz(!) and may well be the fastest 8-bit general purpose 74HC logic breadboard computer to this date.
+
+![Ultra](https://github.com/slu4coder/Minimal-UART-CPU-System/assets/52576999/d5833745-f6b6-445d-8d78-65e7aefbb769)
+
 # Minimal UART CPU System
-
-NEWS: Minimal CPU 2.0 'Ultra' is now running in at 10MHz and may well be the fastest 8-bit general purpose 74HC logic breadboard computer to this date.
-
-NEWS: Check out the full 'Minimal 64 Home Computer' with VGA and PS/2 at https://github.com/slu4coder/The-Minimal-64-Home-Computer
-
-![redux](https://github.com/slu4coder/Minimal-UART-CPU-System/assets/52576999/acc415e3-ad05-4efc-9c1f-75901d5e7321)
 
 ![test](https://github.com/slu4coder/Minimal-UART-CPU-System/assets/52576999/0edf149a-9e37-47e4-8fc6-2b422d1a01ea)
 
