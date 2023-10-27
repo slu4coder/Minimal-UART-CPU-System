@@ -1,4 +1,0 @@
-(fp_lib_table
-  (lib (name ArduinoPC)(type KiCad)(uri "C:/Users/slu4/Documents/KiCAD/Minimal Expansion VideoRAM/ArduinoPC.pretty")(options "")(descr ""))
-  (lib (name logo)(type KiCad)(uri "C:/Users/slu4/Documents/KiCAD/Minimal UART CPU v1.5 Expanded 512KB/logo.pretty")(options "")(descr ""))
-)
