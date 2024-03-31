@@ -2,6 +2,10 @@
 
 See https://github.com/slu4coder/Minimal-64x4-Home-Computer for the most recent version.
 
+Quick note: This is a free and non-commercial project. I am in no way associated with any activies selling this as a product.
+Any such activity represents a license violation. Individual licenses apply for hardware and software parts. Please refer to
+appropriate documentations for detailed licensing information.
+
 Minimal CPU 2.0 'Ultra' is now running at 10MHz(!) and may well be the fastest 8-bit general purpose 74HC logic breadboard computer to this date.
 
 ![Ultra](https://github.com/slu4coder/Minimal-UART-CPU-System/assets/52576999/8298a59d-f1f6-4217-8886-f777201c0c7c)
