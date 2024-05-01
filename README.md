@@ -10,7 +10,7 @@ Minimal CPU 2.0 'Ultra' is now running at 10MHz(!) and may well be the fastest 8
 
 ![Ultra](https://github.com/slu4coder/Minimal-UART-CPU-System/assets/52576999/8298a59d-f1f6-4217-8886-f777201c0c7c)
 
-PCB version 1.5:
+Latest PCB version 1.5:
 
 ![test](https://github.com/slu4coder/Minimal-UART-CPU-System/assets/52576999/0edf149a-9e37-47e4-8fc6-2b422d1a01ea)
 
