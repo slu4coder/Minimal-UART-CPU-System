@@ -6,9 +6,11 @@ Quick note: This is a free and non-commercial project. I am in no way associated
 Any such activity represents a license violation. Individual licenses apply for hardware and software parts. Please refer to
 appropriate documentations for detailed licensing information.
 
-Minimal CPU 2.0 'Ultra' is now running at 10MHz(!) and may well be the fastest 8-bit general purpose 74HC logic breadboard computer to this date.
+Minimal CPU 2.0 'Ultra' is now running at 10MHz(!) and may well be the fastest 8-bit general purpose 74HC logic breadboard computer to this date:
 
 ![Ultra](https://github.com/slu4coder/Minimal-UART-CPU-System/assets/52576999/8298a59d-f1f6-4217-8886-f777201c0c7c)
+
+PCB version 1.5:
 
 ![test](https://github.com/slu4coder/Minimal-UART-CPU-System/assets/52576999/0edf149a-9e37-47e4-8fc6-2b422d1a01ea)
 
